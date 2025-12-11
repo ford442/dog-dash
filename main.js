@@ -110,6 +110,32 @@ const materials = {
     })
 };
 
+// --- WASM Setup ---
+let wasmExports = null;
+let wasmMemory = null;
+
+async function loadWasm() {
+    try {
+        // Fetch the compiled WASM binary
+        const response = await fetch('./build/optimized.wasm');
+        const buffer = await response.arrayBuffer();
+        const module = await WebAssembly.instantiate(buffer, {
+            env: {
+                abort: () => console.log('Abort called from WASM')
+            }
+        });
+        
+        wasmExports = module.instance.exports;
+        wasmMemory = new Float32Array(wasmExports.memory.buffer);
+        console.log("✅ WASM Module Loaded");
+    } catch (err) {
+        console.error("❌ Failed to load WASM:", err);
+    }
+}
+
+// Start loading immediately
+loadWasm();
+
 // =============================================================================
 // PLAYER (Dog Character)
 // =============================================================================
@@ -265,6 +291,7 @@ function createAsteroid(x, y) {
 
 function updateObstacles(delta) {
     const playerX = player.position.x;
+    const playerY = player.position.y; // Capture Y for WASM
 
     // Spawn new obstacles ahead of player
     lastObstacleSpawn += delta;
@@ -275,10 +302,10 @@ function updateObstacles(delta) {
         createAsteroid(spawnX, spawnY);
     }
 
-    // Update and check collision for each obstacle
+    // 1. UPDATE LOOP: Rotate and cleanup obstacles
     for (let i = obstacles.length - 1; i >= 0; i--) {
         const obs = obstacles[i];
-
+        
         // Rotate asteroid
         obs.rotation.x += obs.userData.rotationSpeed * delta;
         obs.rotation.y += obs.userData.rotationSpeed * delta * 0.5;
@@ -287,64 +314,80 @@ function updateObstacles(delta) {
         if (obs.position.x < playerX - 30) {
             scene.remove(obs);
             obstacles.splice(i, 1);
-            continue;
+        }
+    }
+
+    // 2. WASM COLLISION CHECK
+    // Only run if WASM is loaded and player is vulnerable
+    if (wasmExports && wasmMemory && !playerState.invincible && obstacles.length > 0) {
+        
+        // A. Sync Data to WASM Memory
+        // We write [x, y, radius] for every asteroid into the shared memory buffer
+        for (let i = 0; i < obstacles.length; i++) {
+            const obs = obstacles[i];
+            const offset = i * 3; // 3 floats per object
+            
+            // Check to ensure we don't overflow the memory (default is usually 1 page / 64KB)
+            if (offset + 2 < wasmMemory.length) {
+                wasmMemory[offset] = obs.position.x;
+                wasmMemory[offset + 1] = obs.position.y;
+                wasmMemory[offset + 2] = obs.userData.radius;
+            }
         }
 
-        // Collision check (simple sphere)
-        const dx = obs.position.x - player.position.x;
-        const dy = obs.position.y - player.position.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const hitRadius = obs.userData.radius + 0.5; // player radius ~0.5
+        // B. Call WASM function
+        // checkCollision(playerX, playerY, playerRadius, count)
+        const hitIndex = wasmExports.checkCollision(playerX, playerY, 0.5, obstacles.length);
 
-        if (dist < hitRadius) {
-            // Only damage if not invincible
-            if (!playerState.invincible) {
-                // Collision! Flash red and bounce
-                obs.material.emissive = new THREE.Color(0xff0000);
-                obs.material.emissiveIntensity = 1.0;
-                setTimeout(() => {
-                    if (obs.material) {
-                        obs.material.emissive = new THREE.Color(0x000000);
-                        obs.material.emissiveIntensity = 0;
-                    }
-                }, 200);
+        // C. Handle Hit
+        if (hitIndex !== -1) {
+            const obs = obstacles[hitIndex];
+            if (obs) {
+                 // Collision! Flash red and bounce
+                 obs.material.emissive = new THREE.Color(0xff0000);
+                 obs.material.emissiveIntensity = 1.0;
+                 setTimeout(() => {
+                     if (obs.material) {
+                         obs.material.emissive = new THREE.Color(0x000000);
+                         obs.material.emissiveIntensity = 0;
+                     }
+                 }, 200);
+ 
+                 // Reduce health
+                 playerState.health--;
+                 playerState.invincible = true;
+                 
+                 // Flash the rocket
+                 const rocket = player.children[0];
+                 if (rocket) {
+                     rocket.children.forEach(child => {
+                         if (child.material) {
+                             const originalColor = child.material.color.clone();
+                             child.material.color.setHex(0xff0000);
+                             setTimeout(() => {
+                                 if (child.material) {
+                                     child.material.color.copy(originalColor);
+                                 }
+                             }, 200);
+                         }
+                     });
+                 }
+                 
+                 // Invincibility frames (2 seconds)
+                 setTimeout(() => {
+                     playerState.invincible = false;
+                 }, 2000);
+                 
+                 updateHealthDisplay();
+                 
+                 if (playerState.health <= 0) {
+                     gameOver();
+                 }
 
-                // Reduce health
-                playerState.health--;
-                playerState.invincible = true;
-                
-                // Flash the rocket
-                const rocket = player.children[0];
-                if (rocket) {
-                    rocket.children.forEach(child => {
-                        if (child.material) {
-                            const originalColor = child.material.color.clone();
-                            child.material.color.setHex(0xff0000);
-                            setTimeout(() => {
-                                if (child.material) {
-                                    child.material.color.copy(originalColor);
-                                }
-                            }, 200);
-                        }
-                    });
-                }
-                
-                // Invincibility frames (2 seconds)
-                setTimeout(() => {
-                    playerState.invincible = false;
-                }, 2000);
-                
-                // Update health display
-                updateHealthDisplay();
-                
-                // Check for game over
-                if (playerState.health <= 0) {
-                    gameOver();
-                }
-
-                // Bounce player away
-                playerState.velocity.y += (dy > 0 ? -5 : 5);
-                playerState.velocity.x -= 3;
+                 // Bounce player away
+                 const dy = obs.position.y - playerY;
+                 playerState.velocity.y += (dy > 0 ? -5 : 5);
+                 playerState.velocity.x -= 3;
             }
         }
     }
