@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import WebGPU from 'three/examples/jsm/capabilities/WebGPU.js';
 import { WebGPURenderer } from 'three/webgpu';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createStars, uStarOpacity } from './stars.js';
 
 // =============================================================================
@@ -111,111 +112,107 @@ const materials = {
 };
 
 // =============================================================================
-// PLAYER (Dog Character)
+// PLAYER (Rocket Character) - GLB Model Integration
 // =============================================================================
-// =============================================================================
-// PLAYER (Rocket Character)
-// =============================================================================
-function createRocket() {
-    const group = new THREE.Group();
+let player = null;
+const gltfLoader = new GLTFLoader();
 
-    const rocketMat = new THREE.MeshStandardMaterial({
-        color: 0xeeeeee, // White/Silver body
-        roughness: 0.3,
-        metalness: 0.6
-    });
-
-    const highlightMat = new THREE.MeshStandardMaterial({
-        color: 0xe94560, // Red accents
-        roughness: 0.4,
-        metalness: 0.2
-    });
-
-    const windowMat = new THREE.MeshStandardMaterial({
-        color: 0x00ffff, // Cyan window
-        roughness: 0.2,
-        metalness: 0.8,
-        emissive: 0x00ffff,
-        emissiveIntensity: 0.2
-    });
-
-    const glowMat = new THREE.MeshStandardMaterial({
-        color: 0xffaa00, // Thruster glow
-        emissive: 0xff4400,
-        emissiveIntensity: 1.0
-    });
-
-    // 1. Fuselage (Main Body)
-    const fuselageGeo = new THREE.CylinderGeometry(0.35, 0.35, 1.4, 16);
-    const fuselage = new THREE.Mesh(fuselageGeo, rocketMat);
-    fuselage.position.y = 0.7; // Center vertically
-    fuselage.castShadow = true;
-    group.add(fuselage);
-
-    // 2. Nose Cone
-    const noseGeo = new THREE.ConeGeometry(0.35, 0.6, 16);
-    const nose = new THREE.Mesh(noseGeo, highlightMat);
-    nose.position.y = 1.7; // On top of fuselage (0.7 + 0.7 + 0.3)
-    nose.castShadow = true;
-    group.add(nose);
-
-    // 3. Fins (3 fins at equal spacing)
-    const finGeo = new THREE.BoxGeometry(0.1, 0.6, 0.6);
-    // Cut the box to look like a fin? Primitives are limited, let's use thin boxes rotated
-    for (let i = 0; i < 4; i++) {
-        const angle = (i / 4) * Math.PI * 2;
-        const finGroup = new THREE.Group();
-
-        const fin = new THREE.Mesh(finGeo, highlightMat);
-        fin.position.set(0.4, 0.3, 0); // Offset from center
-        fin.castShadow = true;
-
-        finGroup.rotation.y = angle;
-        finGroup.add(fin);
-        group.add(finGroup);
+// Load the rocket GLB model
+gltfLoader.load(
+    'rocket.glb',
+    (gltf) => {
+        const rocketModel = gltf.scene;
+        
+        // Enable shadows for all meshes in the model
+        rocketModel.traverse((child) => {
+            if (child.isMesh) {
+                child.castShadow = true;
+                // Don't set receiveShadow to avoid self-shadowing artifacts
+            }
+        });
+        
+        // Create a container group for the model
+        const group = new THREE.Group();
+        group.add(rocketModel);
+        
+        // Scale the model to match the previous rocket size (~2 units tall)
+        const box = new THREE.Box3().setFromObject(rocketModel);
+        const size = box.getSize(new THREE.Vector3());
+        const maxDimension = Math.max(size.x, size.y, size.z);
+        const targetSize = 2.0;
+        const scale = targetSize / maxDimension;
+        rocketModel.scale.setScalar(scale);
+        
+        // Center the model
+        box.setFromObject(rocketModel);
+        const center = box.getCenter(new THREE.Vector3());
+        rocketModel.position.sub(center);
+        
+        // ROTATE HORIZONTAL: Nose points RIGHT (+X direction)
+        group.rotation.z = -Math.PI / 2;
+        
+        // Add a flame effect to the thruster (procedural, like before)
+        const glowMat = new THREE.MeshStandardMaterial({
+            color: 0xffaa00,
+            emissive: 0xff4400,
+            emissiveIntensity: 1.0
+        });
+        const flameGeo = new THREE.ConeGeometry(0.15, 0.5, 8);
+        const flame = new THREE.Mesh(flameGeo, glowMat);
+        flame.position.y = -0.5;
+        flame.rotation.x = Math.PI;
+        group.add(flame);
+        group.userData.flame = flame;
+        
+        // Container for pitch animation
+        const tiltGroup = new THREE.Group();
+        tiltGroup.add(group);
+        tiltGroup.position.set(0, 5, 0); // Start higher in space
+        
+        // Set as the player
+        player = tiltGroup;
+        scene.add(player);
+        
+        console.log('🚀 Rocket GLB model loaded successfully!');
+    },
+    (xhr) => {
+        console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+    },
+    (error) => {
+        console.error('Error loading rocket GLB model:', error);
+        // Fallback: create a simple placeholder if model fails to load
+        const group = new THREE.Group();
+        
+        const geometry = new THREE.ConeGeometry(0.5, 2, 8);
+        const material = new THREE.MeshStandardMaterial({ color: 0xe94560 });
+        const placeholder = new THREE.Mesh(geometry, material);
+        placeholder.rotation.x = Math.PI;
+        placeholder.castShadow = true;
+        group.add(placeholder);
+        
+        // Add flame effect (same as GLB version)
+        const glowMat = new THREE.MeshStandardMaterial({
+            color: 0xffaa00,
+            emissive: 0xff4400,
+            emissiveIntensity: 1.0
+        });
+        const flameGeo = new THREE.ConeGeometry(0.15, 0.5, 8);
+        const flame = new THREE.Mesh(flameGeo, glowMat);
+        flame.position.y = -0.5;
+        flame.rotation.x = Math.PI;
+        group.add(flame);
+        group.userData.flame = flame;
+        
+        const tiltGroup = new THREE.Group();
+        tiltGroup.add(group);
+        tiltGroup.position.set(0, 5, 0);
+        
+        player = tiltGroup;
+        scene.add(player);
+        
+        console.warn('Using placeholder rocket due to loading error');
     }
-
-    // 4. Window (Porthole)
-    const windowFrameGeo = new THREE.TorusGeometry(0.15, 0.03, 8, 16);
-    const windowFrame = new THREE.Mesh(windowFrameGeo, rocketMat);
-    windowFrame.position.set(0, 1.0, 0.35); // Front of fuselage
-    group.add(windowFrame);
-
-    const windowGlassGeo = new THREE.CircleGeometry(0.15, 16);
-    const windowGlass = new THREE.Mesh(windowGlassGeo, windowMat);
-    windowGlass.position.set(0, 1.0, 0.35);
-    group.add(windowGlass);
-
-    // 5. Thruster Nozzle
-    const nozzleGeo = new THREE.CylinderGeometry(0.2, 0.3, 0.3, 16);
-    const nozzle = new THREE.Mesh(nozzleGeo, new THREE.MeshStandardMaterial({ color: 0x333333 }));
-    nozzle.position.y = -0.15;
-    group.add(nozzle);
-
-    // 6. Flame (Animated later)
-    const flameGeo = new THREE.ConeGeometry(0.15, 0.5, 8);
-    const flame = new THREE.Mesh(flameGeo, glowMat);
-    flame.position.y = -0.5;
-    flame.rotation.x = Math.PI;
-    group.add(flame);
-    group.userData.flame = flame;
-
-    // Position player logic
-    group.position.set(0, 0, 0);
-
-    // ROTATE HORIZONTAL: Nose points RIGHT (+X direction)
-    group.rotation.z = -Math.PI / 2;
-
-    // Container for pitch animation
-    const tiltGroup = new THREE.Group();
-    tiltGroup.add(group);
-    tiltGroup.position.set(0, 5, 0); // Start higher in space
-
-    return tiltGroup;
-}
-
-const player = createRocket();
-scene.add(player);
+);
 
 // Player state
 const playerState = {
@@ -264,6 +261,9 @@ function createAsteroid(x, y) {
 }
 
 function updateObstacles(delta) {
+    // Don't update if player hasn't loaded yet
+    if (!player) return;
+    
     const playerX = player.position.x;
 
     // Spawn new obstacles ahead of player
@@ -313,21 +313,18 @@ function updateObstacles(delta) {
                 playerState.health--;
                 playerState.invincible = true;
                 
-                // Flash the rocket
-                const rocket = player.children[0];
-                if (rocket) {
-                    rocket.children.forEach(child => {
-                        if (child.material) {
-                            const originalColor = child.material.color.clone();
-                            child.material.color.setHex(0xff0000);
-                            setTimeout(() => {
-                                if (child.material) {
-                                    child.material.color.copy(originalColor);
-                                }
-                            }, 200);
-                        }
-                    });
-                }
+                // Flash the rocket - traverse all children to find meshes
+                player.traverse(child => {
+                    if (child.isMesh && child.material) {
+                        const originalColor = child.material.color.clone();
+                        child.material.color.setHex(0xff0000);
+                        setTimeout(() => {
+                            if (child.material) {
+                                child.material.color.copy(originalColor);
+                            }
+                        }, 200);
+                    }
+                });
                 
                 // Invincibility frames (2 seconds)
                 setTimeout(() => {
@@ -597,7 +594,7 @@ function updateHealthDisplay() {
 
 function updateDistanceDisplay() {
     const distanceDiv = document.getElementById('distance-display');
-    if (distanceDiv) {
+    if (distanceDiv && player) {
         const distance = Math.max(0, Math.floor(playerState.distanceToMoon - player.position.x));
         distanceDiv.innerHTML = `Distance to Moon: ${distance}m`;
     }
@@ -734,6 +731,9 @@ function checkPlatformCollision(x, y, radius = 0.3) {
 }
 
 function updatePlayer(delta) {
+    // Don't update if player hasn't loaded yet
+    if (!player) return;
+    
     // Auto-scroll (constant forward movement)
     player.position.x += playerState.autoScrollSpeed * delta;
 
@@ -820,6 +820,9 @@ function updatePlayer(delta) {
 // CAMERA FOLLOW
 // =============================================================================
 function updateCamera() {
+    // Don't update if player hasn't loaded yet
+    if (!player) return;
+    
     // Smooth follow player on X axis
     const targetX = player.position.x;
     const targetY = Math.max(player.position.y + 1, CONFIG.cameraHeight);
@@ -868,7 +871,7 @@ function animate() {
     updateDistanceDisplay();
     
     // Check if player reached the moon
-    if (player.position.x >= playerState.distanceToMoon - 10 && !playerState.hasWon) {
+    if (player && player.position.x >= playerState.distanceToMoon - 10 && !playerState.hasWon) {
         playerState.hasWon = true;
         gameWin();
     }
