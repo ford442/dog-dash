@@ -200,17 +200,15 @@ function createRocket() {
     group.userData.flame = flame;
 
     // Position player logic
-    group.position.set(0, 1, 0);
+    group.position.set(0, 0, 0);
 
-    // Rotate to face right by default (Z-axis is "side")
-    // Actually, in our setup Z=0 is the plane. X is left/right.
-    // The rocket faces "forward" (Z+) with the window. 
-    // We need to rotate it so the window faces the camera (Z+), 
-    // but the movement is X.
+    // ROTATE HORIZONTAL: Nose points RIGHT (+X direction)
+    group.rotation.z = -Math.PI / 2;
 
-    // Let's create a container for tilt animation
+    // Container for pitch animation
     const tiltGroup = new THREE.Group();
     tiltGroup.add(group);
+    tiltGroup.position.set(0, 5, 0); // Start higher in space
 
     return tiltGroup;
 }
@@ -223,8 +221,92 @@ const playerState = {
     velocity: new THREE.Vector3(0, 0, 0),
     isGrounded: false,
     facingRight: true,
-    isRunning: false
+    isRunning: false,
+    autoScrollSpeed: 6 // Constant forward movement
 };
+
+// =============================================================================
+// OBSTACLE SYSTEM
+// =============================================================================
+const obstacles = [];
+const OBSTACLE_SPAWN_INTERVAL = 1.5; // seconds
+let lastObstacleSpawn = 0;
+
+function createAsteroid(x, y) {
+    const size = 0.5 + Math.random() * 1.5;
+    const geo = new THREE.DodecahedronGeometry(size, 0);
+    const mat = new THREE.MeshStandardMaterial({
+        color: 0x666666,
+        roughness: 0.9,
+        metalness: 0.1
+    });
+    const asteroid = new THREE.Mesh(geo, mat);
+    asteroid.position.set(x, y, 0);
+    asteroid.rotation.set(
+        Math.random() * Math.PI,
+        Math.random() * Math.PI,
+        Math.random() * Math.PI
+    );
+    asteroid.castShadow = true;
+    asteroid.userData = {
+        rotationSpeed: (Math.random() - 0.5) * 2,
+        radius: size
+    };
+    scene.add(asteroid);
+    obstacles.push(asteroid);
+    return asteroid;
+}
+
+function updateObstacles(delta) {
+    const playerX = player.position.x;
+
+    // Spawn new obstacles ahead of player
+    lastObstacleSpawn += delta;
+    if (lastObstacleSpawn > OBSTACLE_SPAWN_INTERVAL) {
+        lastObstacleSpawn = 0;
+        const spawnX = playerX + 40 + Math.random() * 20;
+        const spawnY = (Math.random() - 0.5) * 15;
+        createAsteroid(spawnX, spawnY);
+    }
+
+    // Update and check collision for each obstacle
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+        const obs = obstacles[i];
+
+        // Rotate asteroid
+        obs.rotation.x += obs.userData.rotationSpeed * delta;
+        obs.rotation.y += obs.userData.rotationSpeed * delta * 0.5;
+
+        // Remove if behind player
+        if (obs.position.x < playerX - 30) {
+            scene.remove(obs);
+            obstacles.splice(i, 1);
+            continue;
+        }
+
+        // Collision check (simple sphere)
+        const dx = obs.position.x - player.position.x;
+        const dy = obs.position.y - player.position.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const hitRadius = obs.userData.radius + 0.5; // player radius ~0.5
+
+        if (dist < hitRadius) {
+            // Collision! Flash red and bounce
+            obs.material.emissive = new THREE.Color(0xff0000);
+            obs.material.emissiveIntensity = 1.0;
+            setTimeout(() => {
+                if (obs.material) {
+                    obs.material.emissive = new THREE.Color(0x000000);
+                    obs.material.emissiveIntensity = 0;
+                }
+            }, 200);
+
+            // Bounce player away
+            playerState.velocity.y += (dy > 0 ? -5 : 5);
+            playerState.velocity.x -= 3;
+        }
+    }
+}
 
 // =============================================================================
 // LEVEL GEOMETRY
@@ -389,20 +471,36 @@ function checkPlatformCollision(x, y, radius = 0.3) {
 }
 
 function updatePlayer(delta) {
-    const speed = keys.run ? CONFIG.player.runSpeed : CONFIG.player.speed;
+    // Auto-scroll (constant forward movement)
+    player.position.x += playerState.autoScrollSpeed * delta;
 
-    // Horizontal movement
-    if (keys.left) {
-        playerState.velocity.x = -speed;
-        playerState.facingRight = false;
-    } else if (keys.right) {
-        playerState.velocity.x = speed;
-        playerState.facingRight = true;
-    } else {
-        // Apply friction
-        const friction = playerState.isGrounded ? CONFIG.player.groundFriction : CONFIG.player.airFriction;
-        playerState.velocity.x *= friction;
+    // Vertical movement (thrust)
+    if (keys.jump) {
+        playerState.velocity.y += CONFIG.player.thrustForce * delta;
+
+        // Boost flame when thrusting
+        const rocket = player.children[0];
+        if (rocket && rocket.userData.flame) {
+            rocket.userData.flame.scale.set(1.5, 3.0, 1.5);
+        }
     }
+
+    // Optional: Down thrust
+    if (keys.left) {
+        playerState.velocity.y -= CONFIG.player.thrustForce * 0.5 * delta;
+    }
+
+    // Gravity (light)
+    playerState.velocity.y -= CONFIG.player.gravity * delta;
+
+    // Cap vertical speed
+    playerState.velocity.y = Math.max(Math.min(playerState.velocity.y, 12), -12);
+
+    // Apply velocity
+    player.position.y += playerState.velocity.y * delta;
+
+    // Air friction
+    playerState.velocity.y *= CONFIG.player.airFriction;
 
     // Thrust (Flight)
     if (keys.jump) {
@@ -436,27 +534,21 @@ function updatePlayer(delta) {
         playerState.isGrounded = false;
     }
 
-    // Face direction (Not scaling -1, but rotating fins/tilt)
-    // We handle tilt separately.
-
-    // Animation: Hover
-    // Get the inner rocket group (child 0)
+    // Animation: Pitch based on vertical velocity
     const rocket = player.children[0];
     if (rocket) {
+        // Pitch up/down based on Y velocity
+        const targetPitch = playerState.velocity.y * 0.03;
+        player.rotation.z += (targetPitch - player.rotation.z) * 0.1;
+
         // Bobbing
-        const hoverY = Math.sin(Date.now() * 0.005) * 0.1;
+        const hoverY = Math.sin(Date.now() * 0.003) * 0.05;
         rocket.position.y = hoverY;
 
-        // Tilt based on velocity
-        const targetTilt = -playerState.velocity.x * 0.05; // Lean forward/back
-        // Smooth tilt
-        player.rotation.z += (targetTilt - player.rotation.z) * 0.1;
-
         // Flame Flicker
-        if (rocket.userData.flame) {
-            const flicker = 0.8 + Math.random() * 0.4;
-            const len = 1.0 + Math.abs(playerState.velocity.y) * 0.1; // Longer flame when jumping
-            rocket.userData.flame.scale.set(flicker, flicker * len, flicker);
+        if (rocket.userData.flame && !keys.jump) {
+            const flicker = 0.6 + Math.random() * 0.3;
+            rocket.userData.flame.scale.set(flicker, flicker * 1.5, flicker);
         }
     }
 }
@@ -494,6 +586,7 @@ function animate() {
     const delta = Math.min(clock.getDelta(), 0.1); // Cap delta
 
     updatePlayer(delta);
+    updateObstacles(delta);
     updateCamera();
 
     renderer.render(scene, camera);
@@ -510,5 +603,6 @@ window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-console.log('🐕 Dog Dash - 2.5D Side-Scroller loaded!');
-console.log('Controls: A/D or Arrow Keys to move, W/Space to jump, Shift to run');
+console.log('🚀 Dog Dash - Space Flyer loaded!');
+console.log('Controls: SPACE/W to thrust up, A to dive down');
+
