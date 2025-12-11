@@ -314,8 +314,8 @@ const animatedFoliage = [];
 const foliageGroup = new THREE.Group();
 worldGroup.add(foliageGroup);
 
-// Initialize Grass (Reduced count for safety)
-initGrassSystem(scene, 20000);
+// Foliage disabled for blank map
+// initGrassSystem(scene, 20000);
 
 function safeAddFoliage(obj, isObstacle = false, radius = 1.0) {
     if (animatedFoliage.length > 2500) return;
@@ -324,9 +324,9 @@ function safeAddFoliage(obj, isObstacle = false, radius = 1.0) {
     if (isObstacle) obstacles.push({ position: obj.position.clone(), radius });
 }
 
+// --- Spawn Logic (Disabled for blank map) ---
 // --- Spawn Logic ---
-// --- Spawn Logic ---
-const CLUSTER_COUNT = 60;
+const CLUSTER_COUNT = 0; // Disabled - was 60
 for (let i = 0; i < CLUSTER_COUNT; i++) {
     const cx = (Math.random() - 0.5) * 260;
     const cz = (Math.random() - 0.5) * 260;
@@ -438,6 +438,8 @@ function createMushroom(x, z) {
     return { mesh: group, type: 'mushroom' };
 }
 
+// Clouds disabled for blank map
+/*
 const rainingClouds = [];
 for (let i = 0; i < 25; i++) {
     const isRaining = Math.random() > 0.6;
@@ -449,6 +451,8 @@ for (let i = 0; i < 25; i++) {
         rainingClouds.push(cloud);
     }
 }
+*/
+const rainingClouds = [];
 
 // --- OVERGROWN & KING MUSHROOM ZONES ---
 function spawnKingMushroomZone(cx, cz) {
@@ -567,8 +571,9 @@ function spawnOvergrownZone(cx, cz) {
     }
 }
 
-spawnOvergrownZone(-100, -100);
-spawnKingMushroomZone(-100, -100);
+// Disabled for blank map
+// spawnOvergrownZone(-100, -100);
+// spawnKingMushroomZone(-100, -100);
 
 // --- Inputs ---
 const controls = new PointerLockControls(camera, document.body);

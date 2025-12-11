@@ -1,7 +1,7 @@
 {
-  "name": "candy_world",
+  "name": "dog_dash",
   "version": "1.0.0",
-  "description": "A 3D world of rudimentary, but sharp graphically nature - featuring smooth, glossy shapes in a pastel candy-colored landscape.",
+  "description": "Dog Dash - A 3D world exploration game.",
   "type": "module",
   "scripts": {
     "dev": "vite",
