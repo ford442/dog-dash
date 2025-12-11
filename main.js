@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import WebGPU from 'three/examples/jsm/capabilities/WebGPU.js';
 import { WebGPURenderer } from 'three/webgpu';
+import { createStars, uStarOpacity } from './stars.js';
 
 // =============================================================================
 // DOG DASH - 2.5D Side-Scroller
@@ -222,7 +223,11 @@ const playerState = {
     isGrounded: false,
     facingRight: true,
     isRunning: false,
-    autoScrollSpeed: 6 // Constant forward movement
+    autoScrollSpeed: 6, // Constant forward movement
+    health: 3, // Ship can survive 3 collisions
+    maxHealth: 3,
+    invincible: false, // Invincibility frames after hit
+    distanceToMoon: 500 // Distance to reach the moon
 };
 
 // =============================================================================
@@ -291,19 +296,55 @@ function updateObstacles(delta) {
         const hitRadius = obs.userData.radius + 0.5; // player radius ~0.5
 
         if (dist < hitRadius) {
-            // Collision! Flash red and bounce
-            obs.material.emissive = new THREE.Color(0xff0000);
-            obs.material.emissiveIntensity = 1.0;
-            setTimeout(() => {
-                if (obs.material) {
-                    obs.material.emissive = new THREE.Color(0x000000);
-                    obs.material.emissiveIntensity = 0;
-                }
-            }, 200);
+            // Only damage if not invincible
+            if (!playerState.invincible) {
+                // Collision! Flash red and bounce
+                obs.material.emissive = new THREE.Color(0xff0000);
+                obs.material.emissiveIntensity = 1.0;
+                setTimeout(() => {
+                    if (obs.material) {
+                        obs.material.emissive = new THREE.Color(0x000000);
+                        obs.material.emissiveIntensity = 0;
+                    }
+                }, 200);
 
-            // Bounce player away
-            playerState.velocity.y += (dy > 0 ? -5 : 5);
-            playerState.velocity.x -= 3;
+                // Reduce health
+                playerState.health--;
+                playerState.invincible = true;
+                
+                // Flash the rocket
+                const rocket = player.children[0];
+                if (rocket) {
+                    rocket.children.forEach(child => {
+                        if (child.material) {
+                            const originalColor = child.material.color.clone();
+                            child.material.color.setHex(0xff0000);
+                            setTimeout(() => {
+                                if (child.material) {
+                                    child.material.color.copy(originalColor);
+                                }
+                            }, 200);
+                        }
+                    });
+                }
+                
+                // Invincibility frames (2 seconds)
+                setTimeout(() => {
+                    playerState.invincible = false;
+                }, 2000);
+                
+                // Update health display
+                updateHealthDisplay();
+                
+                // Check for game over
+                if (playerState.health <= 0) {
+                    gameOver();
+                }
+
+                // Bounce player away
+                playerState.velocity.y += (dy > 0 ? -5 : 5);
+                playerState.velocity.x -= 3;
+            }
         }
     }
 }
@@ -383,8 +424,228 @@ const bgLayer2 = createBackgroundLayer(-5, 0x1a1a35, 15);  // Mid
 const bgLayer3 = createBackgroundLayer(-3, 0x202045, 10);  // Near
 
 // =============================================================================
+// SPACE ENVIRONMENT (Stars, Galaxies, Moon)
+// =============================================================================
+
+// Add stars to the scene
+const stars = createStars(3000);
+scene.add(stars);
+uStarOpacity.value = 0.8; // Make stars visible
+
+// Create distant galaxies/nebulae
+function createGalaxy(x, y, z, color) {
+    const group = new THREE.Group();
+    
+    // Main nebula cloud
+    const cloudGeo = new THREE.SphereGeometry(15, 16, 16);
+    const cloudMat = new THREE.MeshBasicMaterial({
+        color: color,
+        transparent: true,
+        opacity: 0.15,
+        blending: THREE.AdditiveBlending,
+        side: THREE.BackSide
+    });
+    const cloud = new THREE.Mesh(cloudGeo, cloudMat);
+    group.add(cloud);
+    
+    // Inner glow
+    const glowGeo = new THREE.SphereGeometry(8, 16, 16);
+    const glowMat = new THREE.MeshBasicMaterial({
+        color: color,
+        transparent: true,
+        opacity: 0.25,
+        blending: THREE.AdditiveBlending
+    });
+    const glow = new THREE.Mesh(glowGeo, glowMat);
+    group.add(glow);
+    
+    // Bright core
+    const coreGeo = new THREE.SphereGeometry(3, 12, 12);
+    const coreMat = new THREE.MeshBasicMaterial({
+        color: color,
+        transparent: true,
+        opacity: 0.4,
+        blending: THREE.AdditiveBlending
+    });
+    const core = new THREE.Mesh(coreGeo, coreMat);
+    group.add(core);
+    
+    group.position.set(x, y, z);
+    group.userData.rotationSpeed = (Math.random() - 0.5) * 0.02;
+    return group;
+}
+
+// Create a few distant galaxies
+const galaxy1 = createGalaxy(200, 30, -100, 0x8844ff);
+scene.add(galaxy1);
+
+const galaxy2 = createGalaxy(-150, -20, -120, 0x4488ff);
+scene.add(galaxy2);
+
+const galaxy3 = createGalaxy(300, 10, -90, 0xff4488);
+scene.add(galaxy3);
+
+// Create the distant moon (goal)
+function createMoon() {
+    const group = new THREE.Group();
+    
+    // Moon surface
+    const moonGeo = new THREE.SphereGeometry(8, 32, 32);
+    const moonMat = new THREE.MeshStandardMaterial({
+        color: 0xcccccc,
+        roughness: 0.9,
+        metalness: 0.1,
+        emissive: 0xaaaaaa,
+        emissiveIntensity: 0.2
+    });
+    const moon = new THREE.Mesh(moonGeo, moonMat);
+    moon.castShadow = true;
+    group.add(moon);
+    
+    // Add some craters
+    for (let i = 0; i < 8; i++) {
+        const craterGeo = new THREE.SphereGeometry(0.5 + Math.random() * 1.5, 8, 8);
+        const craterMat = new THREE.MeshStandardMaterial({
+            color: 0x888888,
+            roughness: 0.95
+        });
+        const crater = new THREE.Mesh(craterGeo, craterMat);
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.random() * Math.PI;
+        crater.position.set(
+            Math.sin(phi) * Math.cos(theta) * 7,
+            Math.sin(phi) * Math.sin(theta) * 7,
+            Math.cos(phi) * 7
+        );
+        group.add(crater);
+    }
+    
+    // Moon glow/atmosphere
+    const atmosphereGeo = new THREE.SphereGeometry(9, 32, 32);
+    const atmosphereMat = new THREE.MeshBasicMaterial({
+        color: 0x88aaff,
+        transparent: true,
+        opacity: 0.1,
+        blending: THREE.AdditiveBlending,
+        side: THREE.BackSide
+    });
+    const atmosphere = new THREE.Mesh(atmosphereGeo, atmosphereMat);
+    group.add(atmosphere);
+    
+    group.userData.atmosphere = atmosphere;
+    return group;
+}
+
+const moon = createMoon();
+moon.position.set(500, 5, -50); // Position far ahead
+scene.add(moon);
+
+// =============================================================================
 // INPUT HANDLING
 // =============================================================================
+
+// UI Elements for health and distance
+function createUI() {
+    // Health display
+    const healthDiv = document.createElement('div');
+    healthDiv.id = 'health-display';
+    healthDiv.style.position = 'absolute';
+    healthDiv.style.top = '20px';
+    healthDiv.style.left = '20px';
+    healthDiv.style.color = '#e94560';
+    healthDiv.style.fontSize = '24px';
+    healthDiv.style.fontWeight = 'bold';
+    healthDiv.style.textShadow = '0 0 10px rgba(233, 69, 96, 0.5)';
+    healthDiv.style.fontFamily = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
+    healthDiv.style.zIndex = '100';
+    document.body.appendChild(healthDiv);
+    
+    // Distance display
+    const distanceDiv = document.createElement('div');
+    distanceDiv.id = 'distance-display';
+    distanceDiv.style.position = 'absolute';
+    distanceDiv.style.top = '60px';
+    distanceDiv.style.left = '20px';
+    distanceDiv.style.color = '#4488ff';
+    distanceDiv.style.fontSize = '18px';
+    distanceDiv.style.fontWeight = 'bold';
+    distanceDiv.style.textShadow = '0 0 10px rgba(68, 136, 255, 0.5)';
+    distanceDiv.style.fontFamily = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
+    distanceDiv.style.zIndex = '100';
+    document.body.appendChild(distanceDiv);
+    
+    updateHealthDisplay();
+    updateDistanceDisplay();
+}
+
+function updateHealthDisplay() {
+    const healthDiv = document.getElementById('health-display');
+    if (healthDiv) {
+        const hearts = '❤️'.repeat(playerState.health) + '🖤'.repeat(playerState.maxHealth - playerState.health);
+        healthDiv.innerHTML = `Health: ${hearts}`;
+        
+        // Flash red if damaged
+        if (playerState.health < playerState.maxHealth) {
+            healthDiv.style.animation = 'none';
+            setTimeout(() => {
+                healthDiv.style.animation = 'pulse 1s ease-in-out';
+            }, 10);
+        }
+    }
+}
+
+function updateDistanceDisplay() {
+    const distanceDiv = document.getElementById('distance-display');
+    if (distanceDiv) {
+        const distance = Math.max(0, Math.floor(playerState.distanceToMoon - player.position.x));
+        distanceDiv.innerHTML = `Distance to Moon: ${distance}m`;
+    }
+}
+
+function gameOver() {
+    // Create game over overlay
+    const gameOverDiv = document.createElement('div');
+    gameOverDiv.style.position = 'absolute';
+    gameOverDiv.style.top = '0';
+    gameOverDiv.style.left = '0';
+    gameOverDiv.style.width = '100%';
+    gameOverDiv.style.height = '100%';
+    gameOverDiv.style.display = 'flex';
+    gameOverDiv.style.flexDirection = 'column';
+    gameOverDiv.style.justifyContent = 'center';
+    gameOverDiv.style.alignItems = 'center';
+    gameOverDiv.style.background = 'rgba(26, 26, 46, 0.95)';
+    gameOverDiv.style.zIndex = '200';
+    gameOverDiv.innerHTML = `
+        <h1 style="color: #e94560; font-size: 4em; margin: 0; text-shadow: 0 0 30px rgba(233, 69, 96, 0.5); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">GAME OVER</h1>
+        <p style="color: #888; font-size: 1.5em; margin-top: 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">Your ship was destroyed!</p>
+        <button onclick="location.reload()" style="margin-top: 30px; padding: 15px 40px; font-size: 1.2em; background: #e94560; color: white; border: none; border-radius: 8px; cursor: pointer; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; box-shadow: 0 4px 0 #b83650;">Retry</button>
+    `;
+    document.body.appendChild(gameOverDiv);
+}
+
+function gameWin() {
+    // Create win overlay
+    const winDiv = document.createElement('div');
+    winDiv.style.position = 'absolute';
+    winDiv.style.top = '0';
+    winDiv.style.left = '0';
+    winDiv.style.width = '100%';
+    winDiv.style.height = '100%';
+    winDiv.style.display = 'flex';
+    winDiv.style.flexDirection = 'column';
+    winDiv.style.justifyContent = 'center';
+    winDiv.style.alignItems = 'center';
+    winDiv.style.background = 'rgba(26, 26, 46, 0.95)';
+    winDiv.style.zIndex = '200';
+    winDiv.innerHTML = `
+        <h1 style="color: #4488ff; font-size: 4em; margin: 0; text-shadow: 0 0 30px rgba(68, 136, 255, 0.8); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">MISSION SUCCESS!</h1>
+        <p style="color: #888; font-size: 1.5em; margin-top: 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">You reached the moon!</p>
+        <button onclick="location.reload()" style="margin-top: 30px; padding: 15px 40px; font-size: 1.2em; background: #4488ff; color: white; border: none; border-radius: 8px; cursor: pointer; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; box-shadow: 0 4px 0 #3366cc;">Play Again</button>
+    `;
+    document.body.appendChild(winDiv);
+}
+
 const keys = {
     left: false,
     right: false,
@@ -443,6 +704,7 @@ document.addEventListener('keyup', onKeyUp);
 const instructions = document.getElementById('instructions');
 instructions.addEventListener('click', () => {
     instructions.style.display = 'none';
+    createUI(); // Create UI when game starts
 });
 
 // =============================================================================
@@ -588,6 +850,27 @@ function animate() {
     updatePlayer(delta);
     updateObstacles(delta);
     updateCamera();
+    
+    // Rotate galaxies slowly
+    if (galaxy1) galaxy1.rotation.z += galaxy1.userData.rotationSpeed;
+    if (galaxy2) galaxy2.rotation.z += galaxy2.userData.rotationSpeed;
+    if (galaxy3) galaxy3.rotation.z += galaxy3.userData.rotationSpeed;
+    
+    // Rotate and pulse moon atmosphere
+    if (moon && moon.userData.atmosphere) {
+        moon.rotation.y += 0.002;
+        const pulse = Math.sin(Date.now() * 0.001) * 0.5 + 0.5;
+        moon.userData.atmosphere.material.opacity = 0.1 + pulse * 0.1;
+    }
+    
+    // Update distance display
+    updateDistanceDisplay();
+    
+    // Check if player reached the moon
+    if (player.position.x >= playerState.distanceToMoon - 10 && !playerState.hasWon) {
+        playerState.hasWon = true;
+        gameWin();
+    }
 
     renderer.render(scene, camera);
 }
@@ -603,6 +886,7 @@ window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-console.log('🚀 Dog Dash - Space Flyer loaded!');
-console.log('Controls: SPACE/W to thrust up, A to dive down');
+console.log('🚀 Space Dash - Journey to the Moon!');
+console.log('Controls: SPACE to thrust up, A to dive down');
+console.log('Objective: Reach the moon while surviving asteroid impacts (3 lives)');
 
