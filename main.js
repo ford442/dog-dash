@@ -127,7 +127,7 @@ gltfLoader.load(
         rocketModel.traverse((child) => {
             if (child.isMesh) {
                 child.castShadow = true;
-                child.receiveShadow = true;
+                // Don't set receiveShadow to avoid self-shadowing artifacts
             }
         });
         
@@ -181,13 +181,30 @@ gltfLoader.load(
     (error) => {
         console.error('Error loading rocket GLB model:', error);
         // Fallback: create a simple placeholder if model fails to load
+        const group = new THREE.Group();
+        
         const geometry = new THREE.ConeGeometry(0.5, 2, 8);
         const material = new THREE.MeshStandardMaterial({ color: 0xe94560 });
         const placeholder = new THREE.Mesh(geometry, material);
         placeholder.rotation.x = Math.PI;
+        placeholder.castShadow = true;
+        group.add(placeholder);
+        
+        // Add flame effect (same as GLB version)
+        const glowMat = new THREE.MeshStandardMaterial({
+            color: 0xffaa00,
+            emissive: 0xff4400,
+            emissiveIntensity: 1.0
+        });
+        const flameGeo = new THREE.ConeGeometry(0.15, 0.5, 8);
+        const flame = new THREE.Mesh(flameGeo, glowMat);
+        flame.position.y = -0.5;
+        flame.rotation.x = Math.PI;
+        group.add(flame);
+        group.userData.flame = flame;
         
         const tiltGroup = new THREE.Group();
-        tiltGroup.add(placeholder);
+        tiltGroup.add(group);
         tiltGroup.position.set(0, 5, 0);
         
         player = tiltGroup;
@@ -296,21 +313,18 @@ function updateObstacles(delta) {
                 playerState.health--;
                 playerState.invincible = true;
                 
-                // Flash the rocket
-                const rocket = player.children[0];
-                if (rocket) {
-                    rocket.children.forEach(child => {
-                        if (child.material) {
-                            const originalColor = child.material.color.clone();
-                            child.material.color.setHex(0xff0000);
-                            setTimeout(() => {
-                                if (child.material) {
-                                    child.material.color.copy(originalColor);
-                                }
-                            }, 200);
-                        }
-                    });
-                }
+                // Flash the rocket - traverse all children to find meshes
+                player.traverse(child => {
+                    if (child.isMesh && child.material) {
+                        const originalColor = child.material.color.clone();
+                        child.material.color.setHex(0xff0000);
+                        setTimeout(() => {
+                            if (child.material) {
+                                child.material.color.copy(originalColor);
+                            }
+                        }, 200);
+                    }
+                });
                 
                 // Invincibility frames (2 seconds)
                 setTimeout(() => {
