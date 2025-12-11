@@ -11,9 +11,9 @@ import {
     addGrassInstance
 } from './foliage.js';
 import { ParticleSystem } from './particles.js';
-import {
-    SporeCloud,
-    createChromaShiftRock,
+import { 
+    SporeCloud, 
+    createChromaShiftRock, 
     updateChromaRock,
     createFracturedGeode,
     updateGeode,
@@ -942,27 +942,27 @@ let gameStarted = false;
 
 canvas.addEventListener('click', (event) => {
     if (!gameStarted) return;
-
+    
     // Get mouse position in normalized device coordinates
     const rect = canvas.getBoundingClientRect();
     const mouse = new THREE.Vector2();
     mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
+    
     // Create raycaster
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(mouse, camera);
-
+    
     // Check intersection with spore clouds
     sporeClouds.forEach(cloud => {
         if (!cloud.active) return;
-
+        
         // Check each spore in the cloud
         const intersects = raycaster.intersectObjects(cloud.spores, false);
         if (intersects.length > 0) {
             const hitPoint = intersects[0].point;
             const triggered = cloud.triggerChainReaction(hitPoint);
-
+            
             if (triggered > 0) {
                 // Add explosion particles at hit point
                 particleSystem.emit(hitPoint, 0x88ff88, 20, 8.0, 1.0, 2.0);
@@ -1135,16 +1135,16 @@ function animate() {
     // --- NEW: Update Geological Objects ---
     // Update spore clouds (brownian motion)
     sporeClouds.forEach(cloud => cloud.update(delta));
-
+    
     // Update chroma-shift rocks (color animation)
     chromaRocks.forEach(rock => updateChromaRock(rock, camera.position, delta, time));
-
+    
     // Update geodes (EM field pulse)
     geodes.forEach(geode => updateGeode(geode, delta, time));
-
+    
     // Update nebula jelly-moss (pulsing and drifting)
     jellyMosses.forEach(jellyMoss => updateNebulaJellyMoss(jellyMoss, delta, time));
-
+    
     // Rotate galaxies slowly
     if (galaxy1) galaxy1.rotation.z += galaxy1.userData.rotationSpeed;
     if (galaxy2) galaxy2.rotation.z += galaxy2.userData.rotationSpeed;
