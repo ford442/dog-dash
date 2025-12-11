@@ -112,83 +112,107 @@ const materials = {
 // =============================================================================
 // PLAYER (Dog Character)
 // =============================================================================
-function createPlayer() {
+// =============================================================================
+// PLAYER (Rocket Character)
+// =============================================================================
+function createRocket() {
     const group = new THREE.Group();
 
-    // Body (capsule-like shape for the dog)
-    const bodyGeo = new THREE.CapsuleGeometry(0.3, 0.6, 8, 16);
-    const body = new THREE.Mesh(bodyGeo, materials.player);
-    body.rotation.z = Math.PI / 2; // Lay horizontal
-    body.castShadow = true;
-    group.add(body);
-
-    // Head
-    const headGeo = new THREE.SphereGeometry(0.25, 16, 16);
-    const head = new THREE.Mesh(headGeo, materials.player);
-    head.position.set(0.5, 0.1, 0);
-    head.castShadow = true;
-    group.add(head);
-
-    // Ears
-    const earGeo = new THREE.ConeGeometry(0.1, 0.2, 8);
-    const leftEar = new THREE.Mesh(earGeo, materials.player);
-    leftEar.position.set(0.55, 0.35, -0.1);
-    leftEar.rotation.z = -0.3;
-    group.add(leftEar);
-
-    const rightEar = new THREE.Mesh(earGeo, materials.player);
-    rightEar.position.set(0.55, 0.35, 0.1);
-    rightEar.rotation.z = -0.3;
-    group.add(rightEar);
-
-    // Snout
-    const snoutGeo = new THREE.CylinderGeometry(0.08, 0.12, 0.2, 8);
-    const snout = new THREE.Mesh(snoutGeo, materials.player);
-    snout.position.set(0.7, 0.05, 0);
-    snout.rotation.z = Math.PI / 2;
-    group.add(snout);
-
-    // Legs (4 small cylinders)
-    const legGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.3, 8);
-    const legPositions = [
-        { x: 0.25, z: 0.15 },  // Front right
-        { x: 0.25, z: -0.15 }, // Front left
-        { x: -0.25, z: 0.15 }, // Back right
-        { x: -0.25, z: -0.15 } // Back left
-    ];
-
-    group.userData.legs = [];
-    legPositions.forEach((pos, i) => {
-        const leg = new THREE.Mesh(legGeo, materials.player);
-        leg.position.set(pos.x, -0.3, pos.z);
-        leg.castShadow = true;
-        group.add(leg);
-        group.userData.legs.push(leg);
+    const rocketMat = new THREE.MeshStandardMaterial({
+        color: 0xeeeeee, // White/Silver body
+        roughness: 0.3,
+        metalness: 0.6
     });
 
-    // Tail
-    const tailGeo = new THREE.CylinderGeometry(0.04, 0.06, 0.3, 8);
-    const tail = new THREE.Mesh(tailGeo, materials.player);
-    tail.position.set(-0.55, 0.15, 0);
-    tail.rotation.z = Math.PI / 4;
-    group.add(tail);
-    group.userData.tail = tail;
+    const highlightMat = new THREE.MeshStandardMaterial({
+        color: 0xe94560, // Red accents
+        roughness: 0.4,
+        metalness: 0.2
+    });
 
-    // Eyes
-    const eyeGeo = new THREE.SphereGeometry(0.04, 8, 8);
-    const eyeMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
-    const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
-    leftEye.position.set(0.65, 0.15, -0.12);
-    group.add(leftEye);
+    const windowMat = new THREE.MeshStandardMaterial({
+        color: 0x00ffff, // Cyan window
+        roughness: 0.2,
+        metalness: 0.8,
+        emissive: 0x00ffff,
+        emissiveIntensity: 0.2
+    });
 
-    const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
-    rightEye.position.set(0.65, 0.15, 0.12);
-    group.add(rightEye);
+    const glowMat = new THREE.MeshStandardMaterial({
+        color: 0xffaa00, // Thruster glow
+        emissive: 0xff4400,
+        emissiveIntensity: 1.0
+    });
 
-    // Position player
+    // 1. Fuselage (Main Body)
+    const fuselageGeo = new THREE.CylinderGeometry(0.35, 0.35, 1.4, 16);
+    const fuselage = new THREE.Mesh(fuselageGeo, rocketMat);
+    fuselage.position.y = 0.7; // Center vertically
+    fuselage.castShadow = true;
+    group.add(fuselage);
+
+    // 2. Nose Cone
+    const noseGeo = new THREE.ConeGeometry(0.35, 0.6, 16);
+    const nose = new THREE.Mesh(noseGeo, highlightMat);
+    nose.position.y = 1.7; // On top of fuselage (0.7 + 0.7 + 0.3)
+    nose.castShadow = true;
+    group.add(nose);
+
+    // 3. Fins (3 fins at equal spacing)
+    const finGeo = new THREE.BoxGeometry(0.1, 0.6, 0.6);
+    // Cut the box to look like a fin? Primitives are limited, let's use thin boxes rotated
+    for (let i = 0; i < 4; i++) {
+        const angle = (i / 4) * Math.PI * 2;
+        const finGroup = new THREE.Group();
+
+        const fin = new THREE.Mesh(finGeo, highlightMat);
+        fin.position.set(0.4, 0.3, 0); // Offset from center
+        fin.castShadow = true;
+
+        finGroup.rotation.y = angle;
+        finGroup.add(fin);
+        group.add(finGroup);
+    }
+
+    // 4. Window (Porthole)
+    const windowFrameGeo = new THREE.TorusGeometry(0.15, 0.03, 8, 16);
+    const windowFrame = new THREE.Mesh(windowFrameGeo, rocketMat);
+    windowFrame.position.set(0, 1.0, 0.35); // Front of fuselage
+    group.add(windowFrame);
+
+    const windowGlassGeo = new THREE.CircleGeometry(0.15, 16);
+    const windowGlass = new THREE.Mesh(windowGlassGeo, windowMat);
+    windowGlass.position.set(0, 1.0, 0.35);
+    group.add(windowGlass);
+
+    // 5. Thruster Nozzle
+    const nozzleGeo = new THREE.CylinderGeometry(0.2, 0.3, 0.3, 16);
+    const nozzle = new THREE.Mesh(nozzleGeo, new THREE.MeshStandardMaterial({ color: 0x333333 }));
+    nozzle.position.y = -0.15;
+    group.add(nozzle);
+
+    // 6. Flame (Animated later)
+    const flameGeo = new THREE.ConeGeometry(0.15, 0.5, 8);
+    const flame = new THREE.Mesh(flameGeo, glowMat);
+    flame.position.y = -0.5;
+    flame.rotation.x = Math.PI;
+    group.add(flame);
+    group.userData.flame = flame;
+
+    // Position player logic
     group.position.set(0, 1, 0);
 
-    return group;
+    // Rotate to face right by default (Z-axis is "side")
+    // Actually, in our setup Z=0 is the plane. X is left/right.
+    // The rocket faces "forward" (Z+) with the window. 
+    // We need to rotate it so the window faces the camera (Z+), 
+    // but the movement is X.
+
+    // Let's create a container for tilt animation
+    const tiltGroup = new THREE.Group();
+    tiltGroup.add(group);
+
+    return tiltGroup;
 }
 
 const player = createPlayer();
@@ -404,19 +428,29 @@ function updatePlayer(delta) {
         playerState.isGrounded = false;
     }
 
-    // Face direction
-    player.scale.x = playerState.facingRight ? 1 : -1;
+    // Face direction (Not scaling -1, but rotating fins/tilt)
+    // We handle tilt separately.
 
-    // Animate legs when moving
-    if (Math.abs(playerState.velocity.x) > 0.5 && playerState.isGrounded) {
-        const legAnim = Math.sin(Date.now() * 0.02) * 0.3;
-        player.userData.legs.forEach((leg, i) => {
-            leg.rotation.x = legAnim * (i < 2 ? 1 : -1);
-        });
+    // Animation: Hover
+    // Get the inner rocket group (child 0)
+    const rocket = player.children[0];
+    if (rocket) {
+        // Bobbing
+        const hoverY = Math.sin(Date.now() * 0.005) * 0.1;
+        rocket.position.y = hoverY;
+
+        // Tilt based on velocity
+        const targetTilt = -playerState.velocity.x * 0.05; // Lean forward/back
+        // Smooth tilt
+        player.rotation.z += (targetTilt - player.rotation.z) * 0.1;
+
+        // Flame Flicker
+        if (rocket.userData.flame) {
+            const flicker = 0.8 + Math.random() * 0.4;
+            const len = 1.0 + Math.abs(playerState.velocity.y) * 0.1; // Longer flame when jumping
+            rocket.userData.flame.scale.set(flicker, flicker * len, flicker);
+        }
     }
-
-    // Animate tail
-    player.userData.tail.rotation.z = Math.PI / 4 + Math.sin(Date.now() * 0.005) * 0.2;
 }
 
 // =============================================================================
