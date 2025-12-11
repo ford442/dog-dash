@@ -227,7 +227,8 @@ const playerState = {
     health: 3, // Ship can survive 3 collisions
     maxHealth: 3,
     invincible: false, // Invincibility frames after hit
-    distanceToMoon: 500 // Distance to reach the moon
+    distanceToMoon: 500, // Distance to reach the moon
+    hasWon: false // Track if player has won
 };
 
 // =============================================================================
@@ -588,7 +589,7 @@ function updateHealthDisplay() {
         if (playerState.health < playerState.maxHealth) {
             healthDiv.style.animation = 'none';
             setTimeout(() => {
-                healthDiv.style.animation = 'pulse 1s ease-in-out';
+                healthDiv.style.animation = 'pulse 2s ease-in-out';
             }, 10);
         }
     }
