@@ -5,6 +5,90 @@ import * as THREE from 'three';
  * Implements various space environment objects from plan.md
  */
 
+// --- Nebula Jelly-Moss ---
+export function createNebulaJellyMoss(options = {}) {
+    const { size = 5, color = 0x44ff88 } = options;
+    const group = new THREE.Group();
+    
+    // Gelatinous membrane (semi-transparent sphere)
+    const membraneGeo = new THREE.SphereGeometry(size, 32, 32);
+    const membraneMat = new THREE.MeshStandardMaterial({
+        color: 0x88ffaa,
+        transparent: true,
+        opacity: 0.3,
+        roughness: 0.2,
+        metalness: 0.1,
+        side: THREE.DoubleSide
+    });
+    const membrane = new THREE.Mesh(membraneGeo, membraneMat);
+    group.add(membrane);
+    
+    // Inner fractal moss (layered spheres with different scales)
+    const mossLayers = 3;
+    for (let i = 0; i < mossLayers; i++) {
+        const layerSize = size * (0.3 + i * 0.2);
+        const mossGeo = new THREE.IcosahedronGeometry(layerSize, 1);
+        const mossMat = new THREE.MeshStandardMaterial({
+            color: color,
+            emissive: color,
+            emissiveIntensity: 0.8 - i * 0.2,
+            transparent: true,
+            opacity: 0.6 - i * 0.15,
+            roughness: 0.9
+        });
+        
+        const moss = new THREE.Mesh(mossGeo, mossMat);
+        moss.userData.rotationSpeed = (Math.random() - 0.5) * 0.5;
+        moss.userData.layer = i;
+        group.add(moss);
+    }
+    
+    // Store animation data
+    group.userData = {
+        type: 'jellyMoss',
+        pulsePhase: Math.random() * Math.PI * 2,
+        driftSpeed: 0.2 + Math.random() * 0.3,
+        membrane: membrane,
+        baseSize: size
+    };
+    
+    return group;
+}
+
+// Update Nebula Jelly-Moss animation
+export function updateNebulaJellyMoss(jellyMoss, delta, time) {
+    if (!jellyMoss.userData || jellyMoss.userData.type !== 'jellyMoss') return;
+    
+    const data = jellyMoss.userData;
+    const pulseTime = time + data.pulsePhase;
+    
+    // Pulse animation (3s cycle as per plan)
+    const pulse = Math.sin(pulseTime * (Math.PI * 2 / 3)) * 0.5 + 0.5;
+    
+    // Update membrane wobble (vertex shader simulation via scale)
+    const membrane = data.membrane;
+    if (membrane) {
+        membrane.scale.setScalar(1 + Math.sin(pulseTime * 2) * 0.05);
+    }
+    
+    // Counter-rotate moss layers for parallax
+    jellyMoss.children.forEach((child, i) => {
+        if (child.userData.layer !== undefined) {
+            child.rotation.y += child.userData.rotationSpeed * delta;
+            child.rotation.x += child.userData.rotationSpeed * 0.5 * delta;
+            
+            // Pulse brightness
+            if (child.material && child.material.emissive) {
+                child.material.emissiveIntensity = (0.5 + pulse * 0.5) * (1 - child.userData.layer * 0.2);
+            }
+        }
+    });
+    
+    // Sine-wave drifting
+    const driftOffset = Math.sin(time * 0.5 + data.pulsePhase) * data.driftSpeed;
+    jellyMoss.position.y += driftOffset * delta;
+}
+
 // --- Spore Clouds ---
 export class SporeCloud {
     constructor(scene, position, sporeCount = 1000) {

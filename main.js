@@ -16,7 +16,9 @@ import {
     createChromaShiftRock, 
     updateChromaRock,
     createFracturedGeode,
-    updateGeode
+    updateGeode,
+    createNebulaJellyMoss,
+    updateNebulaJellyMoss
 } from './geological.js';
 
 // --- Configuration ---
@@ -654,6 +656,23 @@ createGeodeAtPosition(150, 5, -25);
 createGeodeAtPosition(300, -8, 20);
 createGeodeAtPosition(450, 12, -15);
 
+// Nebula Jelly-Moss - floating gelatinous organisms with fractal moss
+const jellyMosses = [];
+
+function createJellyMossAtPosition(x, y, z, size) {
+    const jellyMoss = createNebulaJellyMoss({ size: size || 2 + Math.random() * 8 });
+    jellyMoss.position.set(x, y, z);
+    scene.add(jellyMoss);
+    jellyMosses.push(jellyMoss);
+    return jellyMoss;
+}
+
+// Add some nebula jelly-moss specimens
+createJellyMossAtPosition(80, 12, -18, 4);  // Small specimen
+createJellyMossAtPosition(180, -8, 22, 8);  // Medium
+createJellyMossAtPosition(280, 15, -12, 15); // Large specimen
+createJellyMossAtPosition(400, 5, 25, 6);   // Medium
+
 // Store plants that live on the moon to animate them later
 const moonPlants = [];
 
@@ -909,6 +928,50 @@ instructions.addEventListener('click', () => {
 });
 
 // =============================================================================
+// INTERACTION SYSTEM - Click to trigger spore cloud chain reactions
+// =============================================================================
+let gameStarted = false;
+
+canvas.addEventListener('click', (event) => {
+    if (!gameStarted) return;
+    
+    // Get mouse position in normalized device coordinates
+    const rect = canvas.getBoundingClientRect();
+    const mouse = new THREE.Vector2();
+    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    
+    // Create raycaster
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, camera);
+    
+    // Check intersection with spore clouds
+    sporeClouds.forEach(cloud => {
+        if (!cloud.active) return;
+        
+        // Check each spore in the cloud
+        const intersects = raycaster.intersectObjects(cloud.spores, false);
+        if (intersects.length > 0) {
+            const hitPoint = intersects[0].point;
+            const triggered = cloud.triggerChainReaction(hitPoint);
+            
+            if (triggered > 0) {
+                // Add explosion particles at hit point
+                particleSystem.emit(hitPoint, 0x88ff88, 20, 8.0, 1.0, 2.0);
+                console.log(`Chain reaction triggered! ${triggered} spores affected`);
+            }
+        }
+    });
+});
+
+// Track when game starts
+const originalInstructionsClick = instructions.onclick;
+instructions.addEventListener('click', () => {
+    gameStarted = true;
+}, { once: true });
+
+
+// =============================================================================
 // PHYSICS & COLLISION
 // =============================================================================
 function checkPlatformCollision(x, y, radius = 0.3) {
@@ -1070,6 +1133,10 @@ function animate() {
     chromaRocks.forEach(rock => updateChromaRock(rock, camera.position, delta));
     
     // Update geodes (EM field pulse)
+    geodes.forEach(geode => updateGeode(geode, delta));
+    
+    // Update nebula jelly-moss (pulsing and drifting)
+    jellyMosses.forEach(jellyMoss => updateNebulaJellyMoss(jellyMoss, delta, time));
     geodes.forEach(geode => updateGeode(geode, delta));
     
     // Rotate galaxies slowly
