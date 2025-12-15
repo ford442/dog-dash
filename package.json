@@ -10,7 +10,7 @@
     "build:wasm": "asc assembly/index.ts -o build/optimized.wasm -t build/optimized.wat --sourceMap --initialMemory 2 --optimize",
     "copy:wasm": "node -e \"const fs=require('fs'); fs.mkdirSync('public/build', { recursive: true }); ['optimized.wasm','optimized.wasm.map'].forEach(f => { const src = 'build/' + f; const dest = 'public/build/' + f; if (fs.existsSync(src)) fs.copyFileSync(src, dest); });\"",
     "predev": "npm run build:wasm && npm run copy:wasm",
-    "watch:wasm": "node -e \"const { spawn, execSync } = require('child_process'); const path = require('path'); const rebuild = () => { console.log('[watch:wasm] Rebuilding...'); try { execSync('npm run build:wasm && npm run copy:wasm', { stdio: 'inherit' }); console.log('[watch:wasm] Done.'); } catch (e) { console.error('[watch:wasm] Build failed.'); } }; rebuild(); require('fs').watch('assembly', { recursive: true }, (eventType, filename) => { if (filename && filename.endsWith('.ts')) { console.log('[watch:wasm] Detected change in', filename); rebuild(); } });\""
+    "watch:wasm": "node scripts/watch-wasm.cjs"
   },
   "keywords": [],
   "author": "",

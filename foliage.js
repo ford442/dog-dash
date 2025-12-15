@@ -1037,8 +1037,10 @@ export function updateSolarSail(solarSail, delta, time, lightPosition = null) {
             leaf.geometry.computeVertexNormals();
         }
 
-        // Update material iridescence based on viewing angle (simulated)
-        if (leaf && leaf.material) {
+        // Throttle material updates (only update every ~0.1 seconds) to reduce GPU state changes
+        // Using time modulo to spread updates across frames
+        const shouldUpdateMaterial = Math.floor(time * 10) % 3 === (i % 3);
+        if (shouldUpdateMaterial && leaf && leaf.material) {
             const shimmer = Math.sin(time * 2 + i) * 0.2 + 0.8;
             leaf.material.iridescenceIOR = 1.5 + shimmer * 0.5;
         }
