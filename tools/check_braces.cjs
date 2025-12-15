@@ -37,7 +37,7 @@ function walk(dir) {
     const full = path.join(dir,f);
     const stat = fs.statSync(full);
     if (stat.isDirectory()) out.push(...walk(full));
-    else if (full.endsWith('.js') || full.endsWith('.ts')) out.push(full);
+    else if (full.endsWith('.js') || full.endsWith('.ts') || full.endsWith('.cjs')) out.push(full);
   }
   return out;
 }

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "prebuild": "node tools/check_braces.js",
+    "prebuild": "node tools/check_braces.cjs",
     "build": "npm run build:wasm && npm run copy:wasm && vite build",
     "preview": "vite preview",
     "build:wasm": "asc assembly/index.ts -o build/optimized.wasm -t build/optimized.wat --sourceMap --initialMemory 2 --optimize",
