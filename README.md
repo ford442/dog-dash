@@ -10,6 +10,11 @@ Dog Dash - A 3D world exploration game.
 - **Animated elements** - Dynamic environment with clouds and effects
 - **3D perspective** - Proper depth rendering with WebGPU
 - **npm buildable** - Modern build system with Vite
+- **Alien Flora & Geological Objects** - Inspired by the design document (plan.md):
+  - **Nebula Jelly-Moss** - Floating gelatinous organisms with pulsing fractal moss cores
+  - **Spore Clouds** - Interactive clouds with chain reaction mechanics (click to trigger!)
+  - **Chroma-Shift Rocks** - Color-shifting crystalline rocks that change hue with distance
+  - **Fractured Geodes** - Crystalline safe harbors with pulsing EM fields
 
 ## How to Run
 
@@ -46,12 +51,22 @@ npm run preview
 
 ## Controls
 
-- **Right Click** - Move forward (run)
-- **A/D** - Strafe left/right
-- **S** - Move backward
-- **W/Space** - Jump
-- **Control** - Hold to sneak
+- **Space** - Thrust up (jump/fly)
+- **A** - Dive down
+- **Mouse Click** - Trigger spore cloud chain reactions
 - **Mouse** - Look around
+
+## Gameplay
+
+Navigate your rocket through space, avoiding asteroids while exploring the alien environment:
+
+- **Survival** - Your ship can survive 3 asteroid collisions before destruction
+- **Journey** - Reach the distant moon to win
+- **Exploration** - Discover alien flora and geological objects:
+  - Click on **Spore Clouds** to trigger beautiful chain reactions
+  - Navigate around **Nebula Jelly-Moss** - gelatinous organisms that pulse and drift
+  - Observe **Chroma-Shift Rocks** that change color as you approach
+  - Find **Fractured Geodes** with their pulsing electromagnetic fields
 
 ## Technical Details
 

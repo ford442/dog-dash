@@ -57,7 +57,7 @@ export function createStars(count = 2000) {
     // Color mixing
     const finalRGB = mix(color(0xFFFFFF), uStarColor, uStarPulse.mul(0.8));
 
-    // --- FIX: Combine RGB with the Opacity Uniform into a vec4 ---
+    // Combine RGB with the Opacity Uniform into a vec4
     mat.colorNode = vec4(finalRGB, uStarOpacity).mul(mat.color);
 
     mat.sizeNode = aSize.mul(intensity.max(0.2));

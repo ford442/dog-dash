@@ -3,11 +3,24 @@ import WebGPU from 'three/examples/jsm/capabilities/WebGPU.js';
 import { WebGPURenderer } from 'three/webgpu';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createStars, uStarOpacity } from './stars.js';
-
-// =============================================================================
-// DOG DASH - 2.5D Side-Scroller
-// Inspired by Inside, Little Nightmares, Metroid Dread
-// =============================================================================
+import { 
+    createSubwooferLotus, 
+    createFiberOpticWillow, 
+    createGlowingFlower, 
+    animateFoliage,
+    initGrassSystem,
+    addGrassInstance
+} from './foliage.js';
+import { ParticleSystem } from './particles.js';
+import {
+    SporeCloud,
+    createChromaShiftRock,
+    updateChromaRock,
+    createFracturedGeode,
+    updateGeode,
+    createNebulaJellyMoss,
+    updateNebulaJellyMoss
+} from './geological.js';
 
 // --- Configuration ---
 const CONFIG = {
@@ -110,6 +123,32 @@ const materials = {
         metalness: 0.0
     })
 };
+
+// --- WASM Setup ---
+let wasmExports = null;
+let wasmMemory = null;
+
+async function loadWasm() {
+    try {
+        // Fetch the compiled WASM binary
+        const response = await fetch('./build/optimized.wasm');
+        const buffer = await response.arrayBuffer();
+        const module = await WebAssembly.instantiate(buffer, {
+            env: {
+                abort: () => console.log('Abort called from WASM')
+            }
+        });
+        
+        wasmExports = module.instance.exports;
+        wasmMemory = new Float32Array(wasmExports.memory.buffer);
+        console.log("✅ WASM Module Loaded");
+    } catch (err) {
+        console.error("❌ Failed to load WASM:", err);
+    }
+}
+
+// Start loading immediately
+loadWasm();
 
 // =============================================================================
 // PLAYER (Rocket Character) - GLB Model Integration
@@ -265,6 +304,7 @@ function updateObstacles(delta) {
     if (!player) return;
     
     const playerX = player.position.x;
+    const playerY = player.position.y; // Capture Y for WASM
 
     // Spawn new obstacles ahead of player
     lastObstacleSpawn += delta;
@@ -275,10 +315,10 @@ function updateObstacles(delta) {
         createAsteroid(spawnX, spawnY);
     }
 
-    // Update and check collision for each obstacle
+    // 1. UPDATE LOOP: Rotate and cleanup obstacles
     for (let i = obstacles.length - 1; i >= 0; i--) {
         const obs = obstacles[i];
-
+        
         // Rotate asteroid
         obs.rotation.x += obs.userData.rotationSpeed * delta;
         obs.rotation.y += obs.userData.rotationSpeed * delta * 0.5;
@@ -287,8 +327,8 @@ function updateObstacles(delta) {
         if (obs.position.x < playerX - 30) {
             scene.remove(obs);
             obstacles.splice(i, 1);
-            continue;
         }
+    }
 
         // Collision check (simple sphere)
         const dx = obs.position.x - player.position.x;
@@ -339,9 +379,62 @@ function updateObstacles(delta) {
                     gameOver();
                 }
 
-                // Bounce player away
-                playerState.velocity.y += (dy > 0 ? -5 : 5);
-                playerState.velocity.x -= 3;
+        // C. Call WASM function
+        // checkCollision(playerX, playerY, playerRadius, count)
+        const hitIndex = wasmExports.checkCollision(playerX, playerY, 0.5, obstacles.length);
+
+        // D. Handle Hit
+        if (hitIndex !== -1) {
+            const obs = obstacles[hitIndex];
+            if (obs) {
+                // --- NEW: Emit Explosion Particles ---
+                particleSystem.emit(obs.position.clone(), 0xff5555, 15, 10.0, 1.2, 1.0);
+                particleSystem.emit(obs.position.clone(), 0xaaaaaa, 10, 8.0, 0.8, 1.0);
+                 // Collision! Flash red and bounce
+                 obs.material.emissive = new THREE.Color(0xff0000);
+                 obs.material.emissiveIntensity = 1.0;
+                 setTimeout(() => {
+                     if (obs.material) {
+                         obs.material.emissive = new THREE.Color(0x000000);
+                         obs.material.emissiveIntensity = 0;
+                     }
+                 }, 200);
+ 
+                 // Reduce health
+                 playerState.health--;
+                 playerState.invincible = true;
+                 
+                 // Flash the rocket
+                 const rocket = player.children[0];
+                 if (rocket) {
+                     rocket.children.forEach(child => {
+                         if (child.material) {
+                             const originalColor = child.material.color.clone();
+                             child.material.color.setHex(0xff0000);
+                             setTimeout(() => {
+                                 if (child.material) {
+                                     child.material.color.copy(originalColor);
+                                 }
+                             }, 200);
+                         }
+                     });
+                 }
+                 
+                 // Invincibility frames (2 seconds)
+                 setTimeout(() => {
+                     playerState.invincible = false;
+                 }, 2000);
+                 
+                 updateHealthDisplay();
+                 
+                 if (playerState.health <= 0) {
+                     gameOver();
+                 }
+
+                 // Bounce player away
+                 const dy = obs.position.y - playerY;
+                 playerState.velocity.y += (dy > 0 ? -5 : 5);
+                 playerState.velocity.x -= 3;
             }
         }
     }
@@ -483,17 +576,93 @@ scene.add(galaxy2);
 const galaxy3 = createGalaxy(300, 10, -90, 0xff4488);
 scene.add(galaxy3);
 
+// PARTICLE SYSTEM (engine trails & explosions)
+const particleSystem = new ParticleSystem(scene);
+
+// =============================================================================
+// GEOLOGICAL OBJECTS & ANOMALIES (from plan.md)
+// =============================================================================
+
+// Spore Clouds - floating clouds of glowing spores
+const sporeClouds = [];
+
+function createSporeCloudAtPosition(x, y, z) {
+    const cloud = new SporeCloud(scene, new THREE.Vector3(x, y, z), 500 + Math.floor(Math.random() * 500));
+    sporeClouds.push(cloud);
+    return cloud;
+}
+
+// Add some spore clouds along the path
+createSporeCloudAtPosition(100, 10, -20);
+createSporeCloudAtPosition(200, -5, 15);
+createSporeCloudAtPosition(350, 8, -10);
+
+// Chroma-Shift Rocks - color-shifting crystalline rocks
+const chromaRocks = [];
+
+function createChromaRockAtPosition(x, y, z) {
+    const rock = createChromaShiftRock({ size: 2 + Math.random() * 2 });
+    rock.position.set(x, y, z);
+    scene.add(rock);
+    chromaRocks.push(rock);
+    return rock;
+}
+
+// Scatter some chroma rocks
+for (let i = 0; i < 8; i++) {
+    const x = 50 + i * 60;
+    const y = (Math.random() - 0.5) * 20;
+    const z = (Math.random() - 0.5) * 30;
+    createChromaRockAtPosition(x, y, z);
+}
+
+// Fractured Geodes - safe harbors with EM fields
+const geodes = [];
+
+function createGeodeAtPosition(x, y, z) {
+    const geode = createFracturedGeode({ size: 3 + Math.random() * 2 });
+    geode.position.set(x, y, z);
+    scene.add(geode);
+    geodes.push(geode);
+    return geode;
+}
+
+// Add geodes at strategic points
+createGeodeAtPosition(150, 5, -25);
+createGeodeAtPosition(300, -8, 20);
+createGeodeAtPosition(450, 12, -15);
+
+// Nebula Jelly-Moss - floating gelatinous organisms with fractal moss
+const jellyMosses = [];
+
+function createJellyMossAtPosition(x, y, z, size) {
+    const jellyMoss = createNebulaJellyMoss({ size: size || 2 + Math.random() * 8 });
+    jellyMoss.position.set(x, y, z);
+    scene.add(jellyMoss);
+    jellyMosses.push(jellyMoss);
+    return jellyMoss;
+}
+
+// Add some nebula jelly-moss specimens
+createJellyMossAtPosition(80, 12, -18, 4);  // Small specimen
+createJellyMossAtPosition(180, -8, 22, 8);  // Medium
+createJellyMossAtPosition(280, 15, -12, 15); // Large specimen
+createJellyMossAtPosition(400, 5, 25, 6);   // Medium
+
+// Store plants that live on the moon to animate them later
+const moonPlants = [];
+
 // Create the distant moon (goal)
 function createMoon() {
     const group = new THREE.Group();
     
-    // Moon surface
+    // 1. Moon Surface (alien palette)
     const moonGeo = new THREE.SphereGeometry(8, 32, 32);
     const moonMat = new THREE.MeshStandardMaterial({
-        color: 0xcccccc,
-        roughness: 0.9,
-        metalness: 0.1,
-        emissive: 0xaaaaaa,
+        color: 0x222244, // Darker, alien purple-grey
+        roughness: 0.8,
+        metalness: 0.2,
+        emissive: 0x111122,
         emissiveIntensity: 0.2
     });
     const moon = new THREE.Mesh(moonGeo, moonMat);
@@ -519,11 +688,12 @@ function createMoon() {
     }
     
     // Moon glow/atmosphere
-    const atmosphereGeo = new THREE.SphereGeometry(9, 32, 32);
+    // 2. Atmosphere
+    const atmosphereGeo = new THREE.SphereGeometry(9.5, 32, 32);
     const atmosphereMat = new THREE.MeshBasicMaterial({
-        color: 0x88aaff,
+        color: 0x8844ff,
         transparent: true,
-        opacity: 0.1,
+        opacity: 0.15,
         blending: THREE.AdditiveBlending,
         side: THREE.BackSide
     });
@@ -531,6 +701,34 @@ function createMoon() {
     group.add(atmosphere);
     
     group.userData.atmosphere = atmosphere;
+
+    // 3. Populate with Alien Plants
+    const plantCount = 15;
+    for (let i = 0; i < plantCount; i++) {
+        let plant;
+        const type = Math.random();
+        if (type < 0.3) {
+            plant = createSubwooferLotus({ color: 0x00ff88 });
+        } else if (type < 0.6) {
+            plant = createFiberOpticWillow({ color: 0xff00ff });
+        } else {
+            plant = createGlowingFlower({ color: 0x00ffff, intensity: 2.0 });
+        }
+
+        // Random position on the top hemisphere so plants are visible
+        const phi = Math.random() * Math.PI * 0.4; // 0..PI/2 mostly
+        const theta = Math.random() * Math.PI * 2;
+        const r = 7.8; // Slightly embedded in surface
+        plant.position.set(
+            r * Math.sin(phi) * Math.cos(theta),
+            r * Math.cos(phi),
+            r * Math.sin(phi) * Math.sin(theta)
+        );
+        plant.lookAt(0, 0, 0);
+        plant.rotateX(-Math.PI / 2);
+        group.add(plant);
+        moonPlants.push(plant);
+    }
     return group;
 }
 
@@ -706,6 +904,49 @@ instructions.addEventListener('click', () => {
 });
 
 // =============================================================================
+// INTERACTION SYSTEM - Click to trigger spore cloud chain reactions
+// =============================================================================
+let gameStarted = false;
+
+canvas.addEventListener('click', (event) => {
+    if (!gameStarted) return;
+
+    // Get mouse position in normalized device coordinates
+    const rect = canvas.getBoundingClientRect();
+    const mouse = new THREE.Vector2();
+    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    // Create raycaster
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, camera);
+
+    // Check intersection with spore clouds
+    sporeClouds.forEach(cloud => {
+        if (!cloud.active) return;
+
+        // Check each spore in the cloud
+        const intersects = raycaster.intersectObjects(cloud.spores, false);
+        if (intersects.length > 0) {
+            const hitPoint = intersects[0].point;
+            const triggered = cloud.triggerChainReaction(hitPoint);
+
+            if (triggered > 0) {
+                // Add explosion particles at hit point
+                particleSystem.emit(hitPoint, 0x88ff88, 20, 8.0, 1.0, 2.0);
+                console.log(`Chain reaction triggered! ${triggered} spores affected`);
+            }
+        }
+    });
+});
+
+// Track when game starts
+instructions.addEventListener('click', () => {
+    gameStarted = true;
+}, { once: true });
+
+
+// =============================================================================
 // PHYSICS & COLLISION
 // =============================================================================
 function checkPlatformCollision(x, y, radius = 0.3) {
@@ -775,6 +1016,12 @@ function updatePlayer(delta) {
         if (rocket && rocket.userData.flame) {
             rocket.userData.flame.scale.set(1.5, 3.0, 1.5); // Big flame
         }
+
+        // --- NEW: Emit Engine Trail ---
+        const exhaustPos = player.position.clone();
+        exhaustPos.x -= 0.5; // slightly behind the rocket
+        exhaustPos.y -= 0.5; // at the nozzle
+        particleSystem.emit(exhaustPos, 0xffaa00, 2, 5.0, 0.8, 0.2);
     }
 
     // Gravity
@@ -850,11 +1097,28 @@ const clock = new THREE.Clock();
 
 function animate() {
     const delta = Math.min(clock.getDelta(), 0.1); // Cap delta
+    const time = clock.getElapsedTime(); // For foliage animation and time-based motion
 
     updatePlayer(delta);
     updateObstacles(delta);
+
+    // --- NEW: Update Particles (engine trails & explosions)
+    particleSystem.update(delta);
     updateCamera();
     
+    // --- NEW: Update Geological Objects ---
+    // Update spore clouds (brownian motion)
+    sporeClouds.forEach(cloud => cloud.update(delta));
+
+    // Update chroma-shift rocks (color animation)
+    chromaRocks.forEach(rock => updateChromaRock(rock, camera.position, delta, time));
+
+    // Update geodes (EM field pulse)
+    geodes.forEach(geode => updateGeode(geode, delta, time));
+
+    // Update nebula jelly-moss (pulsing and drifting)
+    jellyMosses.forEach(jellyMoss => updateNebulaJellyMoss(jellyMoss, delta, time));
+
     // Rotate galaxies slowly
     if (galaxy1) galaxy1.rotation.z += galaxy1.userData.rotationSpeed;
     if (galaxy2) galaxy2.rotation.z += galaxy2.userData.rotationSpeed;
@@ -866,6 +1130,43 @@ function animate() {
         const pulse = Math.sin(Date.now() * 0.001) * 0.5 + 0.5;
         moon.userData.atmosphere.material.opacity = 0.1 + pulse * 0.1;
     }
+
+    // --- NEW: Animate Alien Moon Plants ---
+    // We pass 'false' for isDay because it's space (always night!) and null for audio
+    moonPlants.forEach(plant => {
+        animateFoliage(plant, time, null, false);
+    });
+
+    // --- NEW: Pilot/Player Animations ---
+    try {
+        const rocketRoot = player.children[0];
+        if (rocketRoot) {
+            // Tilt rocket slightly based on vertical velocity
+            const targetTilt = THREE.MathUtils.clamp(-playerState.velocity.y * 0.025, -0.35, 0.35);
+            rocketRoot.rotation.x += (targetTilt - rocketRoot.rotation.x) * 0.06;
+
+            // Animate pilot bob and ears
+            const pilot = rocketRoot.getObjectByName('pilotGroup');
+            if (pilot) {
+                const offset = pilot.userData.animationOffset || 0;
+                const baseY = pilot.userData.baseY ?? pilot.position.y;
+                const bobAmp = keys.jump ? 0.05 : 0.02;
+                const bob = Math.sin(time * 2 + offset) * bobAmp;
+                pilot.position.y = baseY + bob;
+
+                const head = pilot.getObjectByName('pilotHead');
+                const leftEar = pilot.getObjectByName('leftEar');
+                const rightEar = pilot.getObjectByName('rightEar');
+                if (head) {
+                    head.rotation.y = head.userData.baseRotationY + Math.sin(time * 1.5 + offset) * 0.08;
+                }
+                if (leftEar && rightEar) {
+                    leftEar.rotation.z = leftEar.userData.baseRotationZ + Math.sin(time * 6 + offset) * 0.3 * (keys.jump ? 1.5 : 1.0);
+                    rightEar.rotation.z = rightEar.userData.baseRotationZ + Math.sin(time * 6 + offset + Math.PI) * 0.3 * (keys.jump ? 1.5 : 1.0);
+                }
+            }
+        }
+    } catch (e) { /* swallow animation errors gracefully */ }
     
     // Update distance display
     updateDistanceDisplay();
@@ -893,4 +1194,3 @@ window.addEventListener('resize', () => {
 console.log('🚀 Space Dash - Journey to the Moon!');
 console.log('Controls: SPACE to thrust up, A to dive down');
 console.log('Objective: Reach the moon while surviving asteroid impacts (3 lives)');
-
