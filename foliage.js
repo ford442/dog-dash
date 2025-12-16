@@ -1378,3 +1378,138 @@ export function animateFoliage(foliageObject, time, audioData, isDay) {
         }
     }
 }
+
+// --- NEW PLANTS ---
+
+export function createStarDustFern(options = {}) {
+    const { color = 0x8A2BE2 } = options;
+    const group = new THREE.Group();
+
+    // Central small mound
+    const moundGeo = new THREE.SphereGeometry(0.3, 8, 8);
+    const moundMat = createClayMaterial(0x4B0082); // Indigo
+    const mound = new THREE.Mesh(moundGeo, moundMat);
+    mound.position.y = 0.1;
+    group.add(mound);
+
+    // Fern fronds with stardust tips
+    const frondCount = 6 + Math.floor(Math.random() * 4);
+    const frondMat = createClayMaterial(color);
+    registerReactiveMaterial(frondMat);
+
+    const tipMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF }); // Glowing white tips
+
+    for (let i = 0; i < frondCount; i++) {
+        const frondGroup = new THREE.Group();
+        const angle = (i / frondCount) * Math.PI * 2;
+        frondGroup.rotation.y = angle;
+        frondGroup.rotation.x = -Math.PI / 6; // Angle up slightly
+
+        const length = 0.8 + Math.random() * 0.5;
+        // Simple curved plane or series of small planes for the frond
+        const frondGeo = new THREE.BoxGeometry(0.1, length, 0.02);
+        frondGeo.translate(0, length / 2, 0);
+
+        // Bend the frond
+        const pos = frondGeo.attributes.position;
+        for(let v = 0; v < pos.count; v++){
+             const y = pos.getY(v);
+             const z = pos.getZ(v);
+             // Quadratic bend
+             const bend = (y / length) * (y / length) * 0.5;
+             pos.setZ(v, z - bend);
+        }
+        frondGeo.computeVertexNormals();
+
+        const frond = new THREE.Mesh(frondGeo, frondMat);
+        frondGroup.add(frond);
+
+        // Stardust particles at the tip
+        const particles = new THREE.Group();
+        particles.position.set(0, length, -0.5); // End of bent frond
+        for(let p=0; p<3; p++) {
+            const particle = new THREE.Mesh(new THREE.DodecahedronGeometry(0.04, 0), tipMat);
+            particle.position.set(
+                (Math.random() - 0.5) * 0.2,
+                (Math.random() - 0.5) * 0.2,
+                (Math.random() - 0.5) * 0.2
+            );
+            particles.add(particle);
+        }
+        frondGroup.add(particles);
+
+        group.add(frondGroup);
+    }
+
+    group.userData.animationType = 'gentleSway';
+    group.userData.animationOffset = Math.random() * 10;
+    group.userData.type = 'fern';
+    return group;
+}
+
+export function createNebulaRose(options = {}) {
+    const { color = 0xFF1493 } = options; // Deep Pink
+    const group = new THREE.Group();
+
+    // Thorny stem
+    const stemH = 1.2 + Math.random() * 0.5;
+    const stemGeo = new THREE.CylinderGeometry(0.06, 0.08, stemH, 8);
+    stemGeo.translate(0, stemH/2, 0);
+    const stem = new THREE.Mesh(stemGeo, createClayMaterial(0x2F4F4F)); // Dark Slate Gray
+    group.add(stem);
+
+    // Rose Head
+    const headGroup = new THREE.Group();
+    headGroup.position.y = stemH;
+    group.add(headGroup);
+
+    const petalMat = createClayMaterial(color);
+    registerReactiveMaterial(petalMat);
+
+    // Layers of petals
+    const layers = 3;
+    for (let l = 0; l < layers; l++) {
+        const count = 4 + l * 2;
+        const radius = 0.15 + l * 0.1;
+        for (let i = 0; i < count; i++) {
+            const angle = (i / count) * Math.PI * 2 + (l * 0.5);
+            const petalGeo = new THREE.SphereGeometry(radius * 0.5, 8, 8);
+            // Squish to make petal shape
+            petalGeo.scale(1, 0.2, 1);
+
+            const petal = new THREE.Mesh(petalGeo, petalMat);
+
+            // Position in ring
+            const x = Math.cos(angle) * radius * 0.6;
+            const z = Math.sin(angle) * radius * 0.6;
+            const y = l * 0.1;
+
+            petal.position.set(x, y, z);
+
+            // Rotate to face outward and up
+            petal.lookAt(0, 0, 0);
+            petal.rotation.x = -Math.PI / 4 - (l * 0.2); // Outer layers open more
+
+            headGroup.add(petal);
+        }
+    }
+
+    // Nebulous Gas (Translucent Sphere around the flower)
+    const gasGeo = new THREE.SphereGeometry(0.8, 16, 16);
+    const gasMat = new THREE.MeshBasicMaterial({
+        color: color,
+        transparent: true,
+        opacity: 0.15,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+    });
+    const gas = new THREE.Mesh(gasGeo, gasMat);
+    gas.position.y = 0.2;
+    headGroup.add(gas);
+
+    group.userData.animationType = 'sway';
+    group.userData.animationOffset = Math.random() * 10;
+    group.userData.type = 'flower';
+
+    return group;
+}

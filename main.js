@@ -6,6 +6,13 @@ import {
     createSubwooferLotus, 
     createFiberOpticWillow, 
     createGlowingFlower, 
+    createStarDustFern,
+    createNebulaRose,
+    createFlower,
+    createFloweringTree,
+    createShrub,
+    createFloatingOrb,
+    createVine,
     animateFoliage,
     initGrassSystem,
     addGrassInstance,
@@ -151,9 +158,6 @@ async function loadWasm() {
 // Start loading immediately
 loadWasm();
 
-// =============================================================================
-// PLAYER (Dog Character)
-// =============================================================================
 // =============================================================================
 // PLAYER (Rocket Character)
 // =============================================================================
@@ -324,14 +328,172 @@ const playerState = {
     maxHealth: 3,
     invincible: false, // Invincibility frames after hit
     distanceToMoon: 500, // Distance to reach the moon
-    hasWon: false // Track if player has won
+    hasWon: false, // Track if player has won
+    level: 1 // Current level
 };
+
+// =============================================================================
+// LEVEL MANAGER
+// =============================================================================
+class LevelManager {
+    constructor() {
+        this.currentLevel = 1;
+        this.config = {
+            1: {
+                name: "The Neon Garden",
+                distance: 500,
+                asteroidRate: 3.0, // Slow spawn
+                foliageDensity: {
+                    fern: 50,
+                    rose: 30,
+                    lotus: 10,
+                    glowingFlower: 40,
+                    tree: 50,
+                    floweringTree: 40,
+                    shrub: 40,
+                    vine: 15,
+                    orb: 25,
+                    mushroom: 30,
+                    cloud: 25
+                },
+                speed: 6,
+                bgColor: 0x1a1a2e
+            },
+            2: {
+                name: "The Asteroid Belt",
+                distance: 1200, // Start + 700
+                asteroidRate: 0.8, // Fast spawn
+                foliageDensity: {
+                    fern: 10,
+                    rose: 5,
+                    lotus: 5,
+                    glowingFlower: 10,
+                    tree: 10,
+                    floweringTree: 5,
+                    shrub: 10,
+                    vine: 5,
+                    orb: 10,
+                    mushroom: 10,
+                    cloud: 10
+                },
+                speed: 8,
+                bgColor: 0x2d1a1a // Reddish
+            },
+            3: {
+                name: "The Deep Void",
+                distance: 2200, // Start + 1700
+                asteroidRate: 1.2, // Medium but fast rocks?
+                foliageDensity: {
+                    fern: 5,
+                    rose: 0,
+                    lotus: 20, // Alien
+                    glowingFlower: 5,
+                    tree: 5,
+                    floweringTree: 0,
+                    shrub: 5,
+                    vine: 20, // Creepy
+                    orb: 50, // Many orbs
+                    mushroom: 5,
+                    cloud: 40 // Foggy
+                },
+                speed: 10,
+                bgColor: 0x000000 // Pitch black
+            }
+        };
+
+        // Track planted objects to cleanup
+        this.levelObjects = [];
+    }
+
+    startLevel(levelIndex) {
+        this.currentLevel = levelIndex;
+        const cfg = this.config[levelIndex];
+        if (!cfg) return;
+
+        console.log(`Starting Level ${levelIndex}: ${cfg.name}`);
+
+        // Update Game State
+        playerState.autoScrollSpeed = cfg.speed;
+        playerState.distanceToMoon = cfg.distance;
+        scene.background = new THREE.Color(cfg.bgColor);
+        scene.fog.color = new THREE.Color(cfg.bgColor);
+
+        // Update UI
+        const levelDiv = document.getElementById('level-display');
+        if (levelDiv) levelDiv.innerHTML = `Level ${levelIndex}: ${cfg.name}`;
+
+        // Clear previous level objects that are behind (optional, but good for perf)
+        // actually we just keep scrolling, but we need to spawn new density ahead
+
+        // Populate new zone ahead of player
+        this.populateZone(player.position.x + 50, player.position.x + 600, cfg.foliageDensity);
+    }
+
+    populateZone(startX, endX, density) {
+        const width = endX - startX;
+
+        // Helper to spawn
+        const spawn = (count, creatorFn, yRange = [-20, 20], zRange = [-30, 0]) => {
+            for (let i = 0; i < count; i++) {
+                const x = startX + Math.random() * width;
+                const y = yRange[0] + Math.random() * (yRange[1] - yRange[0]);
+                const z = zRange[0] + Math.random() * (zRange[1] - zRange[0]);
+
+                const obj = creatorFn();
+                obj.position.set(x, y, z);
+
+                // Random scale
+                const s = 0.8 + Math.random() * 0.5;
+                obj.scale.set(s, s, s);
+
+                scene.add(obj);
+                this.levelObjects.push(obj);
+
+                // Add to moonPlants for animation update loop
+                moonPlants.push(obj);
+            }
+        };
+
+        // Spawn all types
+        if (density.fern) spawn(density.fern, () => createStarDustFern({ color: 0x8A2BE2 }));
+        if (density.rose) spawn(density.rose, () => createNebulaRose({ color: 0xFF1493 }));
+        if (density.lotus) spawn(density.lotus, () => createSubwooferLotus({ color: 0x00ff88 }));
+        if (density.glowingFlower) spawn(density.glowingFlower, () => createGlowingFlower({ color: 0x00ffff, intensity: 2.0 }));
+
+        // Standard foliage
+        if (density.tree) spawn(density.tree, () => createFloweringTree({ color: 0x44ffaa }), [-20, -5]); // Trees lower
+        if (density.floweringTree) spawn(density.floweringTree, () => createFloweringTree({ color: 0xffaa44 }), [-20, -5]);
+
+        // Floating items
+        if (density.orb) spawn(density.orb, () => createFloatingOrb({ color: 0x88ccff }), [-10, 20]);
+        if (density.cloud) spawn(density.cloud, () => createSporeCloudAtPosition(0,0,0), [-10, 20]).visible = false; // Hack: we use specific cloud function later
+
+        // Add clouds manually because they need the specific class wrapper
+        for(let i=0; i<density.cloud; i++) {
+            const x = startX + Math.random() * width;
+            const y = (Math.random() - 0.5) * 30;
+            const z = -40 + Math.random() * 30;
+            createSporeCloudAtPosition(x, y, z);
+        }
+    }
+
+    checkProgress(playerX) {
+        // Transition logic
+        if (this.currentLevel === 1 && playerX > 500) {
+            this.startLevel(2);
+        } else if (this.currentLevel === 2 && playerX > 1200) {
+            this.startLevel(3);
+        }
+    }
+}
+
+const levelManager = new LevelManager();
 
 // =============================================================================
 // OBSTACLE SYSTEM
 // =============================================================================
 const obstacles = [];
-const OBSTACLE_SPAWN_INTERVAL = 1.5; // seconds
+let OBSTACLE_SPAWN_INTERVAL = 1.5; // seconds
 let lastObstacleSpawn = 0;
 
 function createAsteroid(x, y) {
@@ -362,6 +524,12 @@ function createAsteroid(x, y) {
 function updateObstacles(delta) {
     const playerX = player.position.x;
     const playerY = player.position.y; // Capture Y for WASM
+
+    // Adjust spawn rate based on level
+    const currentCfg = levelManager.config[levelManager.currentLevel];
+    if (currentCfg) {
+        OBSTACLE_SPAWN_INTERVAL = currentCfg.asteroidRate;
+    }
 
     // Spawn new obstacles ahead of player
     lastObstacleSpawn += delta;
@@ -475,47 +643,8 @@ function updateObstacles(delta) {
 }
 
 // =============================================================================
-// LEVEL GEOMETRY
+// LEVEL GEOMETRY & BACKGROUND
 // =============================================================================
-
-// Ground (extends infinitely in X, flat in Z)
-// Ground removed for space theme
-// const groundGeo = new THREE.BoxGeometry(200, 2, 20);
-// const ground = new THREE.Mesh(groundGeo, materials.ground);
-// ground.position.set(0, -1, 0);
-// ground.receiveShadow = true;
-// scene.add(ground);
-
-// Platforms array for collision detection
-const platforms = [];
-
-function createPlatform(x, y, width, height = 0.4, depth = 4) {
-    const geo = new THREE.BoxGeometry(width, height, depth);
-    const platform = new THREE.Mesh(geo, materials.platform);
-    platform.position.set(x, y, 0);
-    platform.receiveShadow = true;
-    platform.castShadow = true;
-    scene.add(platform);
-
-    // Store collision box
-    platforms.push({
-        mesh: platform,
-        minX: x - width / 2,
-        maxX: x + width / 2,
-        minY: y - height / 2,
-        maxY: y + height / 2
-    });
-
-    return platform;
-}
-
-// Create some test platforms
-createPlatform(5, 1.5, 4);
-createPlatform(10, 3, 3);
-createPlatform(15, 2, 5);
-createPlatform(-5, 2, 4);
-createPlatform(-10, 3.5, 3);
-createPlatform(-15, 1, 6);
 
 // Background elements (parallax layers for depth)
 function createBackgroundLayer(zOffset, color, count) {
@@ -626,11 +755,6 @@ function createSporeCloudAtPosition(x, y, z) {
     return cloud;
 }
 
-// Add some spore clouds along the path
-createSporeCloudAtPosition(100, 10, -20);
-createSporeCloudAtPosition(200, -5, 15);
-createSporeCloudAtPosition(350, 8, -10);
-
 // Chroma-Shift Rocks - color-shifting crystalline rocks
 const chromaRocks = [];
 
@@ -640,14 +764,6 @@ function createChromaRockAtPosition(x, y, z) {
     scene.add(rock);
     chromaRocks.push(rock);
     return rock;
-}
-
-// Scatter some chroma rocks
-for (let i = 0; i < 8; i++) {
-    const x = 50 + i * 60;
-    const y = (Math.random() - 0.5) * 20;
-    const z = (Math.random() - 0.5) * 30;
-    createChromaRockAtPosition(x, y, z);
 }
 
 // Fractured Geodes - safe harbors with EM fields
@@ -661,11 +777,6 @@ function createGeodeAtPosition(x, y, z) {
     return geode;
 }
 
-// Add geodes at strategic points
-createGeodeAtPosition(150, 5, -25);
-createGeodeAtPosition(300, -8, 20);
-createGeodeAtPosition(450, 12, -15);
-
 // Nebula Jelly-Moss - floating gelatinous organisms with fractal moss
 const jellyMosses = [];
 
@@ -676,12 +787,6 @@ function createJellyMossAtPosition(x, y, z, size) {
     jellyMosses.push(jellyMoss);
     return jellyMoss;
 }
-
-// Add some nebula jelly-moss specimens
-createJellyMossAtPosition(80, 12, -18, 4);  // Small specimen
-createJellyMossAtPosition(180, -8, 22, 8);  // Medium
-createJellyMossAtPosition(280, 15, -12, 15); // Large specimen
-createJellyMossAtPosition(400, 5, 25, 6);   // Medium
 
 // Solar Sails / Light Leaves - thin-film iridescent organisms catching solar wind
 const solarSails = [];
@@ -696,13 +801,6 @@ function createSolarSailAtPosition(x, y, z) {
     solarSails.push(solarSail);
     return solarSail;
 }
-
-// Add solar sails along the path - they unfold as you approach
-createSolarSailAtPosition(60, 8, -15);
-createSolarSailAtPosition(120, -5, 18);
-createSolarSailAtPosition(220, 12, -20);
-createSolarSailAtPosition(320, -10, 15);
-createSolarSailAtPosition(420, 6, -25);
 
 // Store plants that live on the moon to animate them later
 const moonPlants = [];
@@ -797,6 +895,20 @@ scene.add(moon);
 
 // UI Elements for health and distance
 function createUI() {
+    // Level Display (New)
+    const levelDiv = document.createElement('div');
+    levelDiv.id = 'level-display';
+    levelDiv.style.position = 'absolute';
+    levelDiv.style.top = '20px';
+    levelDiv.style.right = '20px'; // Top right
+    levelDiv.style.color = '#ffcc00';
+    levelDiv.style.fontSize = '30px';
+    levelDiv.style.fontWeight = 'bold';
+    levelDiv.style.textShadow = '0 0 10px rgba(255, 204, 0, 0.5)';
+    levelDiv.style.fontFamily = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
+    levelDiv.style.zIndex = '100';
+    document.body.appendChild(levelDiv);
+
     // Health display
     const healthDiv = document.createElement('div');
     healthDiv.id = 'health-display';
@@ -827,6 +939,9 @@ function createUI() {
     
     updateHealthDisplay();
     updateDistanceDisplay();
+
+    // Start Level 1
+    levelManager.startLevel(1);
 }
 
 function updateHealthDisplay() {
@@ -1113,6 +1228,9 @@ function updatePlayer(delta) {
             rocket.userData.flame.scale.set(flicker, flicker * 1.5, flicker);
         }
     }
+
+    // Level Checking
+    levelManager.checkProgress(player.position.x);
 }
 
 // =============================================================================
