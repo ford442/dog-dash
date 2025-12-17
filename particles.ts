@@ -3,7 +3,17 @@ import * as THREE from 'three';
 const _dummy = new THREE.Object3D();
 
 export class ParticleSystem {
-    constructor(scene, maxParticles = 1000) {
+    maxParticles: number;
+    count: number;
+    positions: THREE.Vector3[];
+    velocities: THREE.Vector3[];
+    lifetimes: number[];
+    maxLifetimes: number[];
+    colors: THREE.Color[];
+    sizes: number[];
+    mesh: THREE.InstancedMesh;
+
+    constructor(scene: THREE.Scene, maxParticles: number = 1000) {
         this.maxParticles = maxParticles;
         this.count = 0;
         
@@ -36,7 +46,7 @@ export class ParticleSystem {
         scene.add(this.mesh);
     }
 
-    emit(pos, colorHex, count = 1, speed = 1.0, size = 1.0, spread = 0.5) {
+    emit(pos: THREE.Vector3, colorHex: number, count: number = 1, speed: number = 1.0, size: number = 1.0, spread: number = 0.5) {
         for (let i = 0; i < count; i++) {
             // Recycle or create new data objects
             if (this.positions.length >= this.maxParticles) {
@@ -77,7 +87,7 @@ export class ParticleSystem {
         }
     }
 
-    update(delta) {
+    update(delta: number) {
         let activeCount = 0;
 
         for (let i = this.positions.length - 1; i >= 0; i--) {
