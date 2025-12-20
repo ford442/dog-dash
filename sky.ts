@@ -6,7 +6,7 @@ import { MeshBasicNodeMaterial } from 'three/webgpu';
 export const uSkyTopColor = uniform(color(0x87CEEB));
 export const uSkyBottomColor = uniform(color(0xFFB6C1));
 
-function createSky() {
+export function createSky() {
     const skyGeo = new THREE.SphereGeometry(1000, 32, 15);
 
     // TSL Gradient
@@ -37,5 +37,3 @@ function createSky() {
     const sky = new THREE.Mesh(skyGeo, skyMat);
     return sky;
 }
-
-export { createSky };

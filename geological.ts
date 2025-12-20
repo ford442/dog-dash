@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createJellyMembraneMaterial, createJellyMossMaterial } from './shaders/jelly-moss';
 
 /**
  * Geological & Crystalline Objects
@@ -6,36 +7,24 @@ import * as THREE from 'three';
  */
 
 // --- Nebula Jelly-Moss ---
-export function createNebulaJellyMoss(options = {}) {
+export function createNebulaJellyMoss(options: any = {}) {
     const { size = 5, color = 0x44ff88 } = options;
     const group = new THREE.Group();
 
-    // Gelatinous membrane (semi-transparent sphere)
-    const membraneGeo = new THREE.SphereGeometry(size, 32, 32);
-    const membraneMat = new THREE.MeshStandardMaterial({
-        color: 0x88ffaa,
-        transparent: true,
-        opacity: 0.3,
-        roughness: 0.2,
-        metalness: 0.1,
-        side: THREE.DoubleSide
-    });
+    // 1. Gelatinous Membrane (Shader-based)
+    const membraneGeo = new THREE.SphereGeometry(size, 64, 64); // Higher poly for wobble
+    const membraneMat = createJellyMembraneMaterial(0x88ffaa);
     const membrane = new THREE.Mesh(membraneGeo, membraneMat);
     group.add(membrane);
 
-    // Inner fractal moss (layered spheres with different scales)
+    // 2. Inner Fractal Moss (Shader-based instances)
     const mossLayers = 3;
     for (let i = 0; i < mossLayers; i++) {
         const layerSize = size * (0.3 + i * 0.2);
-        const mossGeo = new THREE.IcosahedronGeometry(layerSize, 1);
-        const mossMat = new THREE.MeshStandardMaterial({
-            color: color,
-            emissive: color,
-            emissiveIntensity: 0.8 - i * 0.2,
-            transparent: true,
-            opacity: 0.6 - i * 0.15,
-            roughness: 0.9
-        });
+        const mossGeo = new THREE.IcosahedronGeometry(layerSize, 4); // More detail
+
+        // Use custom shader material for moss
+        const mossMat = createJellyMossMaterial(color);
 
         const moss = new THREE.Mesh(mossGeo, mossMat);
         moss.userData.rotationSpeed = (Math.random() - 0.5) * 0.5;
@@ -49,37 +38,54 @@ export function createNebulaJellyMoss(options = {}) {
         pulsePhase: Math.random() * Math.PI * 2,
         driftSpeed: 0.2 + Math.random() * 0.3,
         membrane: membrane,
-        baseSize: size
+        baseSize: size,
+        health: 1.0,
+        isHiding: false
     };
 
     return group;
 }
 
 // Update Nebula Jelly-Moss animation
-export function updateNebulaJellyMoss(jellyMoss, delta, time) {
+export function updateNebulaJellyMoss(jellyMoss: THREE.Group, delta: number, time: number) {
     if (!jellyMoss.userData || jellyMoss.userData.type !== 'jellyMoss') return;
 
     const data = jellyMoss.userData;
     const pulseTime = time + data.pulsePhase;
 
-    // Pulse animation (3s cycle as per plan)
+    // Pulse animation (3s cycle)
     const pulse = Math.sin(pulseTime * (Math.PI * 2 / 3)) * 0.5 + 0.5;
 
-    // Update membrane wobble (vertex shader simulation via scale)
-    const membrane = data.membrane;
-    if (membrane) {
-        membrane.scale.setScalar(1 + Math.sin(pulseTime * 2) * 0.05);
+    // Update membrane uniforms (Shader Node update happens automatically via time node,
+    // but we can update uniforms like uPulse manually if we want game logic influence)
+
+    // Note: With TSL, 'time' node handles animation automatically on GPU.
+    // We only need to update logic-based uniforms.
+
+    const membrane = data.membrane as THREE.Mesh;
+    if (membrane && membrane.material) {
+        const mat = membrane.material as THREE.Material;
+        // Update pulse uniform if exposed
+        if (mat.userData && mat.userData.uPulse) {
+            mat.userData.uPulse.value = pulse;
+        }
+
+        // Example: React to health (shrink wobble if damaged)
+        if (mat.userData && mat.userData.uWobbleStr) {
+            mat.userData.uWobbleStr.value = 0.05 * data.health;
+        }
     }
 
-    // Counter-rotate moss layers for parallax
+    // Counter-rotate moss layers
     jellyMoss.children.forEach((child, i) => {
         if (child.userData.layer !== undefined) {
             child.rotation.y += child.userData.rotationSpeed * delta;
             child.rotation.x += child.userData.rotationSpeed * 0.5 * delta;
 
-            // Pulse brightness
-            if (child.material && child.material.emissive) {
-                child.material.emissiveIntensity = (0.5 + pulse * 0.5) * (1 - child.userData.layer * 0.2);
+            // Update moss pulse uniform
+            const mat = (child as THREE.Mesh).material as THREE.Material;
+            if (mat && mat.userData && mat.userData.uPulse) {
+                mat.userData.uPulse.value = pulse;
             }
         }
     });
@@ -91,7 +97,14 @@ export function updateNebulaJellyMoss(jellyMoss, delta, time) {
 
 // --- Spore Clouds ---
 export class SporeCloud {
-    constructor(scene, position, sporeCount = 1000) {
+    scene: THREE.Scene;
+    position: THREE.Vector3;
+    sporeCount: number;
+    spores: THREE.Mesh[];
+    active: boolean;
+    group: THREE.Group;
+
+    constructor(scene: THREE.Scene, position: THREE.Vector3, sporeCount = 1000) {
         this.scene = scene;
         this.position = position.clone();
         this.sporeCount = sporeCount;
@@ -143,7 +156,7 @@ export class SporeCloud {
         scene.add(this.group);
     }
 
-    update(delta) {
+    update(delta: number) {
         if (!this.active) return;
 
         // Brownian motion with cohesive drift
@@ -179,7 +192,8 @@ export class SporeCloud {
             if (data.reactionTime >= 0) {
                 data.reactionTime += delta;
                 const intensity = Math.max(0, 1 - data.reactionTime);
-                spore.material.emissiveIntensity = 3.0 * intensity;
+                const mat = spore.material as THREE.MeshStandardMaterial;
+                mat.emissiveIntensity = 3.0 * intensity;
                 spore.scale.setScalar(1 + intensity * 0.5);
 
                 if (data.reactionTime > 1.0) {
@@ -189,10 +203,10 @@ export class SporeCloud {
         });
     }
 
-    triggerChainReaction(hitPosition) {
+    triggerChainReaction(hitPosition: THREE.Vector3) {
         // Find spores within reaction radius and trigger cascade
         const reactionRadius = 2.0;
-        const queue = [];
+        const queue: THREE.Mesh[] = [];
 
         this.spores.forEach(spore => {
             const worldPos = spore.getWorldPosition(new THREE.Vector3());
@@ -210,14 +224,14 @@ export class SporeCloud {
         this.scene.remove(this.group);
         this.spores.forEach(spore => {
             if (spore.geometry) spore.geometry.dispose();
-            if (spore.material) spore.material.dispose();
+            if (spore.material) (spore.material as THREE.Material).dispose();
         });
         this.active = false;
     }
 }
 
 // --- Chroma-Shift Rocks ---
-export function createChromaShiftRock(options = {}) {
+export function createChromaShiftRock(options: any = {}) {
     const { size = 2, color = 0x8844ff } = options;
     const group = new THREE.Group();
 
@@ -279,7 +293,7 @@ export function createChromaShiftRock(options = {}) {
 }
 
 // Update chroma-shift effect based on distance
-export function updateChromaRock(rock, cameraPosition, delta, time) {
+export function updateChromaRock(rock: THREE.Group, cameraPosition: THREE.Vector3, delta: number, time: number) {
     if (!rock.userData || rock.userData.type !== 'chromaRock') return;
 
     const distance = rock.position.distanceTo(cameraPosition);
@@ -291,10 +305,10 @@ export function updateChromaRock(rock, cameraPosition, delta, time) {
     const hue = (normalizedDist * 0.3 + timeValue * 0.1) % 1.0;
     const color = new THREE.Color().setHSL(hue, 0.8, 0.5);
 
-    const rockMesh = rock.userData.rock;
+    const rockMesh = rock.userData.rock as THREE.Mesh;
     if (rockMesh && rockMesh.material) {
-        rockMesh.material.emissive.lerp(color, 0.05);
-        rockMesh.material.emissiveIntensity = 0.2 + Math.sin(timeValue) * 0.1;
+        (rockMesh.material as THREE.MeshStandardMaterial).emissive.lerp(color, 0.05);
+        (rockMesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.2 + Math.sin(timeValue) * 0.1;
     }
 
     // Slow rotation
@@ -303,7 +317,7 @@ export function updateChromaRock(rock, cameraPosition, delta, time) {
 }
 
 // --- Fractured Geodes ---
-export function createFracturedGeode(options = {}) {
+export function createFracturedGeode(options: any = {}) {
     const { size = 4, color = 0x8844ff } = options;
     const group = new THREE.Group();
 
@@ -374,15 +388,15 @@ export function createFracturedGeode(options = {}) {
 }
 
 // Update geode EM field animation
-export function updateGeode(geode, delta, time) {
+export function updateGeode(geode: THREE.Group, delta: number, time: number) {
     if (!geode.userData || geode.userData.type !== 'geode') return;
 
-    const glow = geode.userData.glow;
+    const glow = geode.userData.glow as THREE.Mesh;
     if (glow) {
         // Pulse the EM field
         const timeValue = time + geode.userData.timeOffset;
         const pulse = Math.sin(timeValue * 2) * 0.5 + 0.5;
-        glow.material.opacity = 0.1 + pulse * 0.15;
+        (glow.material as THREE.MeshBasicMaterial).opacity = 0.1 + pulse * 0.15;
         glow.scale.setScalar(1 + pulse * 0.1);
     }
 

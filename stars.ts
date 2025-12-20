@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { color, float, vec3, vec4, time, positionLocal, attribute, uniform, mix, length, sin, cos } from 'three/tsl';
+import { color, vec3, vec4, time, positionLocal, attribute, uniform, mix, sin, cos } from 'three/tsl';
 import { PointsNodeMaterial } from 'three/webgpu';
 
 // Global uniform for star pulse (driven by music)
@@ -7,7 +7,7 @@ export const uStarPulse = uniform(0.0); // 0 to 1
 export const uStarColor = uniform(color(0xFFFFFF)); // Current pulse color
 export const uStarOpacity = uniform(0.0); // <--- NEW: Opacity control
 
-export function createStars(count = 2000) {
+export function createStars(count: number = 2000): THREE.Points {
     const geo = new THREE.BufferGeometry();
     const positions = new Float32Array(count * 3);
     const sizes = new Float32Array(count);
@@ -58,7 +58,7 @@ export function createStars(count = 2000) {
     const finalRGB = mix(color(0xFFFFFF), uStarColor, uStarPulse.mul(0.8));
 
     // --- FIX: Combine RGB with the Opacity Uniform into a vec4 ---
-    mat.colorNode = vec4(finalRGB, uStarOpacity).mul(mat.color);
+    mat.colorNode = vec4(finalRGB, uStarOpacity).mul(mat.color as unknown as any);
 
     mat.sizeNode = aSize.mul(intensity.max(0.2));
 
