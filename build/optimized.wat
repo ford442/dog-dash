@@ -1146,6 +1146,15 @@
   (local $5 i32)
   (local $6 f32)
   global.get $assembly/index/asteroidsPtr
+  i32.eqz
+  local.get $3
+  i32.eqz
+  i32.or
+  if
+   i32.const -1
+   return
+  end
+  global.get $assembly/index/asteroidsPtr
   local.set $4
   loop $for-loop|0
    local.get $3

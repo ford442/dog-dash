@@ -606,63 +606,94 @@ function updateObstacles(delta: number) {
         }
     }
 
-    // C. Call WASM function
-    // checkCollision(playerX, playerY, playerRadius, count)
-    const hitIndex = wasmExports.checkCollision(playerX, playerY, 0.5, obstacles.length);
+    // C. Update WASM Memory & Call Collision Check
+    if (wasmExports && obstacles.length > 0) {
+        // 1. Allocate space (returns pointer to existing or new buffer)
+        const ptr = wasmExports.allocAsteroids(obstacles.length);
 
-    // D. Handle Hit
-    if (hitIndex !== -1) {
-        const obs = obstacles[hitIndex];
-        if (obs) {
-            // --- NEW: Emit Explosion Particles ---
-            particleSystem.emit(obs.position.clone(), 0xff5555, 15, 10.0, 1.2, 1.0);
-            particleSystem.emit(obs.position.clone(), 0xaaaaaa, 10, 8.0, 0.8, 1.0);
-            // Collision! Flash red and bounce
-            (obs.material as THREE.MeshStandardMaterial).emissive = new THREE.Color(0xff0000);
-            (obs.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.0;
-            setTimeout(() => {
-                if (obs.material) {
-                    (obs.material as THREE.MeshStandardMaterial).emissive = new THREE.Color(0x000000);
-                         (obs.material as THREE.MeshStandardMaterial).emissiveIntensity = 0;
-                     }
-                 }, 200);
- 
-                 // Reduce health
-                 playerState.health--;
-                 playerState.invincible = true;
-                 
-                 // Flash the rocket
-                 const rocket = player.children[0];
-                 if (rocket) {
-                     rocket.children.forEach((child: any) => {
-                         if (child.material) {
-                             const originalColor = child.material.color.clone();
-                             child.material.color.setHex(0xff0000);
-                             setTimeout(() => {
-                                 if (child.material) {
-                                     child.material.color.copy(originalColor);
-                                 }
-                             }, 200);
-                         }
-                     });
-                 }
-                 
-                 // Invincibility frames (2 seconds)
-                 setTimeout(() => {
-                     playerState.invincible = false;
-                 }, 2000);
-                 
-                 updateHealthDisplay();
-                 
-                 if (playerState.health <= 0) {
-                     gameOver();
-                 }
-
-            // Bounce player away
-            const dy = obs.position.y - playerY;
-            playerState.velocity.y += (dy > 0 ? -5 : 5);
-            playerState.velocity.x -= 3;
+        // 2. Update view if memory grew or changed (simple check)
+        // Note: In a real high-perf scenario we'd cache the view and only update if buffer.byteLength changed
+        // But here we need to be safe.
+        if (!wasmMemory || wasmMemory.buffer !== wasmExports.memory.buffer) {
+            wasmMemory = new Float32Array(wasmExports.memory.buffer);
         }
+
+        // 3. Write data to WASM memory
+        // Ptr is in bytes, Float32Array uses index (bytes / 4)
+        const startIdx = ptr >>> 2;
+        for (let i = 0; i < obstacles.length; i++) {
+            const obs = obstacles[i];
+            const offset = startIdx + (i * 3);
+            wasmMemory[offset] = obs.position.x;
+            wasmMemory[offset + 1] = obs.position.y;
+            wasmMemory[offset + 2] = obs.userData.radius || 1.0;
+        }
+
+        // 4. Check collision
+        // checkCollision(playerX, playerY, playerRadius, count)
+        const hitIndex = wasmExports.checkCollision(playerX, playerY, 0.5, obstacles.length);
+
+        // D. Handle Hit
+        if (hitIndex !== -1) {
+            handleCollision(hitIndex);
+        }
+    }
+}
+
+function handleCollision(hitIndex: number) {
+    const obs = obstacles[hitIndex];
+    if (obs) {
+        // Capture player Y for bounce calculation
+        const playerY = player ? player.position.y : 0;
+
+        // --- NEW: Emit Explosion Particles ---
+        particleSystem.emit(obs.position.clone(), 0xff5555, 15, 10.0, 1.2, 1.0);
+        particleSystem.emit(obs.position.clone(), 0xaaaaaa, 10, 8.0, 0.8, 1.0);
+        // Collision! Flash red and bounce
+        (obs.material as THREE.MeshStandardMaterial).emissive = new THREE.Color(0xff0000);
+        (obs.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.0;
+        setTimeout(() => {
+            if (obs.material) {
+                (obs.material as THREE.MeshStandardMaterial).emissive = new THREE.Color(0x000000);
+                     (obs.material as THREE.MeshStandardMaterial).emissiveIntensity = 0;
+                 }
+             }, 200);
+
+             // Reduce health
+             playerState.health--;
+             playerState.invincible = true;
+
+             // Flash the rocket
+             const rocket = player.children[0];
+             if (rocket) {
+                 rocket.children.forEach((child: any) => {
+                     if (child.material) {
+                         const originalColor = child.material.color.clone();
+                         child.material.color.setHex(0xff0000);
+                         setTimeout(() => {
+                             if (child.material) {
+                                 child.material.color.copy(originalColor);
+                             }
+                         }, 200);
+                     }
+                 });
+             }
+
+             // Invincibility frames (2 seconds)
+             setTimeout(() => {
+                 playerState.invincible = false;
+             }, 2000);
+
+             updateHealthDisplay();
+
+             if (playerState.health <= 0) {
+                 gameOver();
+             }
+
+        // Bounce player away
+        const dy = obs.position.y - playerY;
+        playerState.velocity.y += (dy > 0 ? -5 : 5);
+        playerState.velocity.x -= 3;
     }
 }
 
@@ -1177,15 +1208,24 @@ canvas.addEventListener('click', (event) => {
         if (!cloud.active) return;
 
         // Check each spore in the cloud
+        // Note: For InstancedMesh, intersectObjects returns the mesh with instanceId
         const intersects = raycaster.intersectObjects(cloud.spores, false);
         if (intersects.length > 0) {
             const hitPoint = intersects[0].point;
-            const triggered = cloud.triggerChainReaction(hitPoint);
 
-            if (triggered > 0) {
-                // Add explosion particles at hit point
-                particleSystem.emit(hitPoint, 0x88ff88, 20, 8.0, 1.0, 2.0);
-                console.log(`Chain reaction triggered! ${triggered} spores affected`);
+            // InstancedMesh hit?
+            if (intersects[0].instanceId !== undefined) {
+                 // Pass the hit point to trigger local reaction
+                 const triggered = cloud.triggerChainReaction(hitPoint);
+                 if (triggered > 0) {
+                    particleSystem.emit(hitPoint, 0x88ff88, 20, 8.0, 1.0, 2.0);
+                 }
+            } else {
+                 // Fallback for non-instanced (if any remain)
+                 const triggered = cloud.triggerChainReaction(hitPoint);
+                 if (triggered > 0) {
+                    particleSystem.emit(hitPoint, 0x88ff88, 20, 8.0, 1.0, 2.0);
+                 }
             }
         }
     });
@@ -1368,7 +1408,80 @@ function animate() {
     geodes.forEach(geode => updateGeode(geode, delta, time));
 
     // Update nebula jelly-moss (pulsing and drifting)
-    jellyMosses.forEach(jellyMoss => updateNebulaJellyMoss(jellyMoss, delta, time));
+    jellyMosses.forEach(jellyMoss => {
+        updateNebulaJellyMoss(jellyMoss, delta, time);
+
+        // --- NEW: Jelly Moss Interaction (Stealth & Shield) ---
+        if (player && jellyMoss.visible && jellyMoss.userData.radius) {
+            const dist = player.position.distanceTo(jellyMoss.position);
+            const radius = jellyMoss.userData.radius;
+
+            // Player inside membrane?
+            if (dist < radius) {
+                // Apply Stealth Effect
+                if (!jellyMoss.userData.isHiding) {
+                    jellyMoss.userData.isHiding = true;
+                    // Visual feedback: Make player transparent
+                    const rocket = player.children[0];
+                    if (rocket) {
+                         rocket.traverse((child: any) => {
+                             if (child.isMesh && child.material) {
+                                 // Store original opacity/transparent state if not already
+                                 if (child.userData.originalOpacity === undefined) {
+                                     child.userData.originalOpacity = child.material.opacity;
+                                     child.userData.originalTransparent = child.material.transparent;
+                                 }
+                                 child.material.transparent = true;
+                                 child.material.opacity = 0.4;
+                             }
+                         });
+                    }
+                }
+
+                // Shield Leech simulation
+                const normDist = dist / radius;
+                // Leech rate inversely proportional to distance (closer = more damage)
+                const leechIntensity = THREE.MathUtils.lerp(1.0, 0.0, normDist);
+
+                // Apply subtle visual damage effect (red tint pulse)
+                if (Math.random() < 0.05 * leechIntensity) {
+                    const rocket = player.children[0];
+                    if (rocket) {
+                        rocket.traverse((child: any) => {
+                            if (child.isMesh && child.material && child.material.emissive) {
+                                const oldEmissive = child.material.emissive.getHex();
+                                child.material.emissive.setHex(0xff0000);
+                                setTimeout(() => {
+                                    if(child.material) child.material.emissive.setHex(oldEmissive);
+                                }, 100);
+                            }
+                        });
+                    }
+                }
+
+            } else {
+                // Exit Stealth
+                if (jellyMoss.userData.isHiding) {
+                    jellyMoss.userData.isHiding = false;
+                    const rocket = player.children[0];
+                    if (rocket) {
+                         rocket.traverse((child: any) => {
+                             if (child.isMesh && child.material) {
+                                 // Restore original
+                                 if (child.userData.originalOpacity !== undefined) {
+                                     child.material.opacity = child.userData.originalOpacity;
+                                     child.material.transparent = child.userData.originalTransparent;
+                                 } else {
+                                     child.material.opacity = 1.0;
+                                     child.material.transparent = false;
+                                 }
+                             }
+                         });
+                    }
+                }
+            }
+        }
+    });
 
     // Update solar sails (iridescent rippling, unfold near player)
     solarSails.forEach(solarSail => updateSolarSail(solarSail, delta, time, player.position));

@@ -15,25 +15,18 @@ export function allocAsteroids(count: i32): usize {
 
   // If we need more space than currently allocated, resize
   if (count > asteroidsCapacity) {
-    // If we had a previous buffer, we could free it here if AS had a free(),
-    // but the GC or simple allocator will handle new allocations.
-    // For a simple game loop, we just allocate a new buffer.
-    // Note: In standard AS with --runtime stub (default for low overhead),
-    // `heap.alloc` might be needed or just `new ArrayBuffer`.
-    // However, keeping it simple: let's use a static ArrayBuffer approach
-    // or just let AS manage a specialized array.
-
-    // Simplest approach for raw access: Use a global TypedArray (Float32Array)
-    // and return its data pointer.
     if (asteroidsCapacity == 0) {
        // Initial allocation
        asteroidsPtr = heap.alloc(requiredBytes);
     } else {
-       // Reallocate
+       // Reallocate (might move the pointer)
        asteroidsPtr = heap.realloc(asteroidsPtr, requiredBytes);
     }
     asteroidsCapacity = count;
   }
+
+  // If count is smaller, we just reuse the existing buffer (no shrink)
+  // This avoids constant reallocation jitter.
 
   return asteroidsPtr;
 }
@@ -41,6 +34,11 @@ export function allocAsteroids(count: i32): usize {
 // Checks for collision between a player circle and a list of circular objects.
 // Returns the index of the collided object, or -1 if no collision found.
 export function checkCollision(playerX: f32, playerY: f32, playerRadius: f32, objectCount: i32): i32 {
+  // If no objects or no memory allocated, return no collision
+  if (objectCount == 0 || asteroidsPtr == 0) {
+    return -1;
+  }
+
   let ptr = asteroidsPtr;
 
   for (let i = 0; i < objectCount; i++) {
