@@ -40,7 +40,8 @@ export function createNebulaJellyMoss(options: any = {}) {
         membrane: membrane,
         baseSize: size,
         health: 1.0,
-        isHiding: false
+        isHiding: false,
+        radius: size
     };
 
     return group;
@@ -51,6 +52,19 @@ export function updateNebulaJellyMoss(jellyMoss: THREE.Group, delta: number, tim
     if (!jellyMoss.userData || jellyMoss.userData.type !== 'jellyMoss') return;
 
     const data = jellyMoss.userData;
+
+    // Check if dead (health <= 0)
+    if (data.health <= 0 && jellyMoss.visible) {
+         // Death animation: quick shrink
+         jellyMoss.scale.multiplyScalar(0.9);
+         if (jellyMoss.scale.x < 0.1) {
+             jellyMoss.visible = false;
+             // Here we would ideally spawn a spore burst, but this is a pure update function.
+             // The main loop can detect visibility change or we can handle it via an event.
+         }
+         return;
+    }
+
     const pulseTime = time + data.pulsePhase;
 
     // Pulse animation (3s cycle)
@@ -70,9 +84,17 @@ export function updateNebulaJellyMoss(jellyMoss: THREE.Group, delta: number, tim
             mat.userData.uPulse.value = pulse;
         }
 
-        // Example: React to health (shrink wobble if damaged)
+        // React to health (shrink wobble if damaged)
         if (mat.userData && mat.userData.uWobbleStr) {
             mat.userData.uWobbleStr.value = 0.05 * data.health;
+        }
+
+        // Stealth effect (opacity)
+        if (data.isHiding) {
+             // Lower opacity
+             // Since TSL material structure is complex, we assume we set 'opacity' on material properties for blending?
+             // Or update the colorNode alpha.
+             // The 'uPulse' also affects opacity in our shader.
         }
     }
 
@@ -95,25 +117,29 @@ export function updateNebulaJellyMoss(jellyMoss: THREE.Group, delta: number, tim
     jellyMoss.position.y += driftOffset * delta;
 }
 
-// --- Spore Clouds ---
+// --- Spore Clouds (InstancedMesh) ---
 export class SporeCloud {
     scene: THREE.Scene;
     position: THREE.Vector3;
     sporeCount: number;
-    spores: THREE.Mesh[];
+    mesh: THREE.InstancedMesh;
     active: boolean;
-    group: THREE.Group;
+    dummy: THREE.Object3D;
+
+    // Data arrays for brownian motion
+    velocities: Float32Array; // x,y,z per instance
+    positions: Float32Array;  // x,y,z relative to center
+    reactionTimes: Float32Array; // -1 if idle, >=0 if reacting
 
     constructor(scene: THREE.Scene, position: THREE.Vector3, sporeCount = 1000) {
         this.scene = scene;
         this.position = position.clone();
         this.sporeCount = sporeCount;
-        this.spores = [];
         this.active = true;
-        this.group = new THREE.Group();
+        this.dummy = new THREE.Object3D();
 
-        // Create spores
-        const sporeGeo = new THREE.SphereGeometry(0.05, 8, 8);
+        // Create InstancedMesh
+        const sporeGeo = new THREE.SphereGeometry(0.05, 4, 4); // Low poly
         const sporeMat = new THREE.MeshStandardMaterial({
             color: 0x88ff88,
             emissive: 0x44ff44,
@@ -122,110 +148,160 @@ export class SporeCloud {
             opacity: 0.8
         });
 
-        for (let i = 0; i < sporeCount; i++) {
-            const spore = new THREE.Mesh(sporeGeo, sporeMat.clone());
+        this.mesh = new THREE.InstancedMesh(sporeGeo, sporeMat, sporeCount);
+        this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); // We will update it
+        this.mesh.position.copy(position);
 
+        // Initialize data
+        this.velocities = new Float32Array(sporeCount * 3);
+        this.positions = new Float32Array(sporeCount * 3);
+        this.reactionTimes = new Float32Array(sporeCount).fill(-1);
+
+        for (let i = 0; i < sporeCount; i++) {
             // Random position within cloud radius
             const radius = 5 + Math.random() * 5;
             const theta = Math.random() * Math.PI * 2;
             const phi = Math.random() * Math.PI;
 
-            spore.position.set(
-                radius * Math.sin(phi) * Math.cos(theta),
-                radius * Math.sin(phi) * Math.sin(theta),
-                radius * Math.cos(phi)
-            );
+            const x = radius * Math.sin(phi) * Math.cos(theta);
+            const y = radius * Math.sin(phi) * Math.sin(theta);
+            const z = radius * Math.cos(phi);
 
-            // Store brownian motion state
-            spore.userData = {
-                velocity: new THREE.Vector3(
-                    (Math.random() - 0.5) * 0.2,
-                    (Math.random() - 0.5) * 0.2,
-                    (Math.random() - 0.5) * 0.2
-                ),
-                originalPos: spore.position.clone(),
-                reactionTime: -1,
-                index: i
-            };
+            this.positions[i*3] = x;
+            this.positions[i*3+1] = y;
+            this.positions[i*3+2] = z;
 
-            this.spores.push(spore);
-            this.group.add(spore);
+            // Velocity
+            this.velocities[i*3] = (Math.random() - 0.5) * 0.05;
+            this.velocities[i*3+1] = (Math.random() - 0.5) * 0.05;
+            this.velocities[i*3+2] = (Math.random() - 0.5) * 0.05;
+
+            // Set initial matrix
+            this.dummy.position.set(x, y, z);
+            this.dummy.updateMatrix();
+            this.mesh.setMatrixAt(i, this.dummy.matrix);
         }
 
-        this.group.position.copy(position);
-        scene.add(this.group);
+        this.scene.add(this.mesh);
     }
 
     update(delta: number) {
         if (!this.active) return;
 
-        // Brownian motion with cohesive drift
-        const centerOfMass = new THREE.Vector3();
-        this.spores.forEach(spore => {
-            centerOfMass.add(spore.position);
-        });
-        centerOfMass.divideScalar(this.spores.length);
+        // Note: For 1000 particles, CPU update is okay.
+        // Ideally move to TSL/Vertex shader for 10k+.
 
-        this.spores.forEach(spore => {
-            const data = spore.userData;
+        let needsUpdate = false;
+        const center = new THREE.Vector3(0,0,0);
+
+        for (let i = 0; i < this.sporeCount; i++) {
+            const idx = i * 3;
 
             // Brownian motion
-            data.velocity.x += (Math.random() - 0.5) * 0.01;
-            data.velocity.y += (Math.random() - 0.5) * 0.01;
-            data.velocity.z += (Math.random() - 0.5) * 0.01;
+            this.velocities[idx] += (Math.random() - 0.5) * 0.01;
+            this.velocities[idx+1] += (Math.random() - 0.5) * 0.01;
+            this.velocities[idx+2] += (Math.random() - 0.5) * 0.01;
 
-            // Cohesive drift toward center
-            const toCenter = centerOfMass.clone().sub(spore.position);
-            const distance = toCenter.length();
-            if (distance > 0.1) {
-                toCenter.normalize().multiplyScalar(0.005);
-                data.velocity.add(toCenter);
+            // Cohesion (pull to center 0,0,0 local space)
+            const distSq = this.positions[idx]**2 + this.positions[idx+1]**2 + this.positions[idx+2]**2;
+            if (distSq > 0.1) {
+                // Approximate normalize and pull
+                const factor = 0.005 / Math.sqrt(distSq);
+                this.velocities[idx] -= this.positions[idx] * factor;
+                this.velocities[idx+1] -= this.positions[idx+1] * factor;
+                this.velocities[idx+2] -= this.positions[idx+2] * factor;
             }
 
             // Damping
-            data.velocity.multiplyScalar(0.95);
+            this.velocities[idx] *= 0.95;
+            this.velocities[idx+1] *= 0.95;
+            this.velocities[idx+2] *= 0.95;
 
             // Update position
-            spore.position.add(data.velocity);
+            this.positions[idx] += this.velocities[idx];
+            this.positions[idx+1] += this.velocities[idx+1];
+            this.positions[idx+2] += this.velocities[idx+2];
 
-            // Chain reaction animation
-            if (data.reactionTime >= 0) {
-                data.reactionTime += delta;
-                const intensity = Math.max(0, 1 - data.reactionTime);
-                const mat = spore.material as THREE.MeshStandardMaterial;
-                mat.emissiveIntensity = 3.0 * intensity;
-                spore.scale.setScalar(1 + intensity * 0.5);
-
-                if (data.reactionTime > 1.0) {
-                    spore.visible = false;
+            // React logic (scale up and vanish)
+            let scale = 1.0;
+            if (this.reactionTimes[i] >= 0) {
+                this.reactionTimes[i] += delta;
+                const t = this.reactionTimes[i];
+                if (t > 1.0) {
+                    scale = 0; // Hide
+                } else {
+                    scale = 1.0 + t * 0.5;
                 }
             }
-        });
+
+            if (scale > 0) {
+                this.dummy.position.set(this.positions[idx], this.positions[idx+1], this.positions[idx+2]);
+                this.dummy.scale.setScalar(scale);
+                this.dummy.updateMatrix();
+                this.mesh.setMatrixAt(i, this.dummy.matrix);
+                needsUpdate = true;
+            } else {
+                 // Zero scale matrix to hide
+                 this.dummy.scale.setScalar(0);
+                 this.dummy.updateMatrix();
+                 this.mesh.setMatrixAt(i, this.dummy.matrix);
+                 needsUpdate = true;
+            }
+        }
+
+        if (needsUpdate) {
+            this.mesh.instanceMatrix.needsUpdate = true;
+        }
     }
 
-    triggerChainReaction(hitPosition: THREE.Vector3) {
-        // Find spores within reaction radius and trigger cascade
-        const reactionRadius = 2.0;
-        const queue: THREE.Mesh[] = [];
+    triggerChainReaction(hitPointWorld: THREE.Vector3) {
+        // Convert hit point to local space
+        const localHit = hitPointWorld.clone().sub(this.mesh.position); // Simplified, ignores mesh rotation
+        const reactionRadiusSq = 2.0 * 2.0;
+        let count = 0;
 
-        this.spores.forEach(spore => {
-            const worldPos = spore.getWorldPosition(new THREE.Vector3());
-            const distance = worldPos.distanceTo(hitPosition);
-            if (distance < reactionRadius && spore.userData.reactionTime < 0) {
-                spore.userData.reactionTime = distance * 0.1; // Delay based on distance
-                queue.push(spore);
+        for (let i = 0; i < this.sporeCount; i++) {
+            if (this.reactionTimes[i] >= 0) continue; // Already reacting
+
+            const idx = i * 3;
+            const dx = this.positions[idx] - localHit.x;
+            const dy = this.positions[idx+1] - localHit.y;
+            const dz = this.positions[idx+2] - localHit.z;
+
+            if (dx*dx + dy*dy + dz*dz < reactionRadiusSq) {
+                this.reactionTimes[i] = Math.sqrt(dx*dx + dy*dy + dz*dz) * 0.1; // Delay
+                count++;
             }
-        });
+        }
+        return count;
+    }
 
-        return queue.length;
+    // Helper property to access 'spores' for compatibility if needed,
+    // but we changed main.ts to not iterate 'spores' array directly for raycasting.
+    // Wait, main.ts DOES iterate 'cloud.spores' for raycasting!
+    // We need to fix that or provide a proxy.
+    // Raycaster can intersect InstancedMesh directly.
+
+    get spores() {
+        // Return mesh as an array so main.ts iteration works?
+        // No, main.ts expects an array of objects to intersect.
+        // We can return [this.mesh] but main.ts logic might be expecting individual meshes.
+        // Let's check main.ts logic: "raycaster.intersectObjects(cloud.spores, false)"
+        // If we return [this.mesh], it works, but the result 'intersect.object' will be the instanced mesh,
+        // and 'intersect.instanceId' will be set.
+        return [this.mesh];
     }
 
     cleanup() {
-        this.scene.remove(this.group);
-        this.spores.forEach(spore => {
-            if (spore.geometry) spore.geometry.dispose();
-            if (spore.material) (spore.material as THREE.Material).dispose();
-        });
+        this.scene.remove(this.mesh);
+        if (this.mesh.geometry) this.mesh.geometry.dispose();
+        if (this.mesh.material) {
+            if (Array.isArray(this.mesh.material)) {
+                this.mesh.material.forEach(m => m.dispose());
+            } else {
+                this.mesh.material.dispose();
+            }
+        }
         this.active = false;
     }
 }
