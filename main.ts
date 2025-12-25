@@ -311,7 +311,393 @@ type LevelConfig = {
     };
     speed: number;
     bgColor: number;
+    // New tunnel-related properties
+    levelType?: 'open' | 'tunnel' | 'organic_tunnel';
+    tunnelHeight?: number;
+    obstacleInterval?: number;
+    fogDensity?: number;
 };
+
+// =============================================================================
+// INDUSTRIAL TUNNEL GEOMETRY (Level 4: The Rusty Gauntlet)
+// =============================================================================
+
+// Track industrial sections and pistons for updates
+const industrialSections: THREE.Group[] = [];
+const pistons: THREE.Group[] = [];
+const blastDoors: THREE.Group[] = [];
+const whaleRibSections: THREE.Group[] = [];
+const barnacles: THREE.Mesh[] = [];
+
+/**
+ * Creates an industrial tunnel section with floor/ceiling plates
+ * Based on plan.md Section V: Industrial Megastructures
+ */
+function createIndustrialSection(xPos: number): THREE.Group {
+    const group = new THREE.Group();
+    const sectionLength = 20; // 20m sections
+    const tunnelHeight = 15; // Vertical clearance
+
+    // Rusted metal material (as per plan.md: roughness 0.9, metallic 0.8)
+    const rustedMetalMat = new THREE.MeshStandardMaterial({
+        color: 0x664422,
+        roughness: 0.9,
+        metalness: 0.8
+    });
+
+    // Glowing orange seams material (emission 3.0)
+    const seamMat = new THREE.MeshStandardMaterial({
+        color: 0xff6600,
+        emissive: 0xff4400,
+        emissiveIntensity: 3.0
+    });
+
+    // Floor plate
+    const floorGeo = new THREE.BoxGeometry(sectionLength, 0.5, 10);
+    const floor = new THREE.Mesh(floorGeo, rustedMetalMat);
+    floor.position.set(0, -tunnelHeight / 2, 0);
+    floor.receiveShadow = true;
+    group.add(floor);
+
+    // Ceiling plate
+    const ceiling = new THREE.Mesh(floorGeo, rustedMetalMat);
+    ceiling.position.set(0, tunnelHeight / 2, 0);
+    ceiling.receiveShadow = true;
+    group.add(ceiling);
+
+    // Add glowing seams along floor edges
+    const seamGeo = new THREE.BoxGeometry(sectionLength, 0.1, 0.1);
+    for (let z of [-4.5, 4.5]) {
+        const seam = new THREE.Mesh(seamGeo, seamMat);
+        seam.position.set(0, -tunnelHeight / 2 + 0.3, z);
+        group.add(seam);
+    }
+
+    // Randomly spawn obstacles: Piston or Blast Door
+    const obstacleChance = Math.random();
+    if (obstacleChance < 0.4) {
+        // Spawn a Piston
+        const piston = createPiston(0, tunnelHeight);
+        group.add(piston);
+        pistons.push(piston);
+    } else if (obstacleChance < 0.6) {
+        // Spawn a Blast Door
+        const door = createBlastDoor(sectionLength / 2, tunnelHeight);
+        group.add(door);
+        blastDoors.push(door);
+    }
+
+    // Add some wall details
+    const wallPanelGeo = new THREE.BoxGeometry(0.2, tunnelHeight * 0.8, 8);
+    for (let i = 0; i < 3; i++) {
+        const panel = new THREE.Mesh(wallPanelGeo, rustedMetalMat);
+        panel.position.set(-sectionLength / 2 + i * sectionLength / 3, 0, -5);
+        group.add(panel);
+    }
+
+    group.position.x = xPos;
+    group.userData = {
+        type: 'industrialSection',
+        sectionLength: sectionLength
+    };
+
+    scene.add(group);
+    industrialSections.push(group);
+    return group;
+}
+
+/**
+ * Creates a Piston obstacle - animated vertical crusher
+ * Simple: 2m diameter, 3m stroke, 2s cycle
+ */
+function createPiston(xOffset: number, tunnelHeight: number): THREE.Group {
+    const group = new THREE.Group();
+
+    // Piston base (ceiling mount)
+    const baseGeo = new THREE.CylinderGeometry(1.2, 1.2, 0.5, 16);
+    const metalMat = new THREE.MeshStandardMaterial({
+        color: 0x555555,
+        roughness: 0.7,
+        metalness: 0.9
+    });
+    const base = new THREE.Mesh(baseGeo, metalMat);
+    base.position.y = tunnelHeight / 2 - 0.25;
+    group.add(base);
+
+    // Piston shaft
+    const shaftGeo = new THREE.CylinderGeometry(0.5, 0.5, 4, 12);
+    const shaft = new THREE.Mesh(shaftGeo, metalMat);
+    shaft.position.y = tunnelHeight / 2 - 2.5;
+    group.add(shaft);
+
+    // Piston head (crusher plate)
+    const headGeo = new THREE.CylinderGeometry(1, 1, 0.8, 16);
+    const headMat = new THREE.MeshStandardMaterial({
+        color: 0xcc4400,
+        roughness: 0.6,
+        metalness: 0.8,
+        emissive: 0x331100,
+        emissiveIntensity: 0.3
+    });
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.position.y = tunnelHeight / 2 - 5;
+    group.add(head);
+
+    group.position.x = xOffset;
+    group.userData = {
+        type: 'piston',
+        baseY: tunnelHeight / 2 - 5,
+        stroke: 3, // 3m stroke
+        cycleSpeed: Math.PI, // 2s cycle (2*PI / cycleSpeed = 2)
+        phase: Math.random() * Math.PI * 2,
+        head: head,
+        shaft: shaft
+    };
+
+    return group;
+}
+
+/**
+ * Creates a Blast Door - requires shooting to open (simplified version)
+ */
+function createBlastDoor(xOffset: number, tunnelHeight: number): THREE.Group {
+    const group = new THREE.Group();
+
+    // Door frame
+    const frameMat = new THREE.MeshStandardMaterial({
+        color: 0x444444,
+        roughness: 0.8,
+        metalness: 0.7
+    });
+
+    // Top frame
+    const topFrameGeo = new THREE.BoxGeometry(1, 1, 8);
+    const topFrame = new THREE.Mesh(topFrameGeo, frameMat);
+    topFrame.position.set(0, tunnelHeight / 2 - 0.5, 0);
+    group.add(topFrame);
+
+    // Door panels (close from top and bottom)
+    const doorMat = new THREE.MeshStandardMaterial({
+        color: 0x663333,
+        roughness: 0.9,
+        metalness: 0.6,
+        emissive: 0x220000,
+        emissiveIntensity: 0.2
+    });
+
+    const doorGeo = new THREE.BoxGeometry(0.5, tunnelHeight / 2 - 1, 6);
+    const topDoor = new THREE.Mesh(doorGeo, doorMat);
+    topDoor.position.set(0, tunnelHeight / 4, 0);
+    group.add(topDoor);
+
+    const bottomDoor = new THREE.Mesh(doorGeo, doorMat);
+    bottomDoor.position.set(0, -tunnelHeight / 4, 0);
+    group.add(bottomDoor);
+
+    // Warning light
+    const lightGeo = new THREE.SphereGeometry(0.3, 8, 8);
+    const lightMat = new THREE.MeshStandardMaterial({
+        color: 0xff0000,
+        emissive: 0xff0000,
+        emissiveIntensity: 2.0
+    });
+    const warningLight = new THREE.Mesh(lightGeo, lightMat);
+    warningLight.position.set(0, tunnelHeight / 2 - 1.5, 4);
+    group.add(warningLight);
+
+    group.position.x = xOffset;
+    group.userData = {
+        type: 'blastDoor',
+        isOpen: false,
+        openProgress: 0,
+        topDoor: topDoor,
+        bottomDoor: bottomDoor,
+        warningLight: warningLight,
+        tunnelHeight: tunnelHeight
+    };
+
+    return group;
+}
+
+// =============================================================================
+// SPACE WHALE GEOMETRY (Level 5: The Astral Leviathan)
+// =============================================================================
+
+/**
+ * Creates a Whale Rib Section - large curved rib bones forming an organic tunnel
+ * Based on plan.md Section III: Fossilized Space Whales
+ */
+function createWhaleRibSection(xPos: number): THREE.Group {
+    const group = new THREE.Group();
+    const sectionLength = 25;
+    const ribHeight = 20; // 40m clearance total, but ribs arch upward
+
+    // Bone material - aged, fossilized
+    const boneMat = new THREE.MeshStandardMaterial({
+        color: 0xddc8a8,
+        roughness: 0.85,
+        metalness: 0.05,
+        emissive: 0x221100,
+        emissiveIntensity: 0.1
+    });
+
+    // Create curved rib bones on both sides
+    const ribCount = 3; // 3 ribs per section
+    for (let i = 0; i < ribCount; i++) {
+        const ribOffset = (i - 1) * (sectionLength / 3);
+
+        // Left rib
+        const leftRib = createRibBone(ribHeight, true);
+        leftRib.position.set(ribOffset, 0, -8);
+        leftRib.rotation.y = Math.PI / 2;
+        group.add(leftRib);
+
+        // Right rib
+        const rightRib = createRibBone(ribHeight, false);
+        rightRib.position.set(ribOffset, 0, 8);
+        rightRib.rotation.y = -Math.PI / 2;
+        group.add(rightRib);
+    }
+
+    // Add barnacles to surfaces
+    const barnacleCount = 8 + Math.floor(Math.random() * 8);
+    for (let i = 0; i < barnacleCount; i++) {
+        const barnacle = createBarnacle();
+        barnacle.position.set(
+            (Math.random() - 0.5) * sectionLength,
+            (Math.random() - 0.5) * ribHeight * 0.8,
+            (Math.random() > 0.5 ? -7 : 7) + (Math.random() - 0.5) * 2
+        );
+        group.add(barnacle);
+        barnacles.push(barnacle);
+    }
+
+    // Spine/vertebrae along the bottom
+    const spineGeo = new THREE.CylinderGeometry(1.5, 1.5, sectionLength, 12);
+    const spine = new THREE.Mesh(spineGeo, boneMat);
+    spine.rotation.z = Math.PI / 2;
+    spine.position.y = -ribHeight / 2;
+    group.add(spine);
+
+    group.position.x = xPos;
+    group.userData = {
+        type: 'whaleRibSection',
+        sectionLength: sectionLength
+    };
+
+    scene.add(group);
+    whaleRibSections.push(group);
+    return group;
+}
+
+/**
+ * Creates a single curved rib bone
+ */
+function createRibBone(height: number, isLeft: boolean): THREE.Group {
+    const group = new THREE.Group();
+
+    const boneMat = new THREE.MeshStandardMaterial({
+        color: 0xddc8a8,
+        roughness: 0.85,
+        metalness: 0.05
+    });
+
+    // Create curved rib using tube geometry
+    const curve = new THREE.QuadraticBezierCurve3(
+        new THREE.Vector3(0, -height / 2, 0),
+        new THREE.Vector3(isLeft ? 3 : -3, 0, 0),
+        new THREE.Vector3(0, height / 2, 0)
+    );
+
+    const ribGeo = new THREE.TubeGeometry(curve, 20, 0.8, 8, false);
+    const rib = new THREE.Mesh(ribGeo, boneMat);
+    rib.castShadow = true;
+    group.add(rib);
+
+    // Add some bony protrusions
+    const protrusionCount = 3;
+    for (let i = 0; i < protrusionCount; i++) {
+        const t = (i + 1) / (protrusionCount + 1);
+        const point = curve.getPoint(t);
+        
+        const protrusionGeo = new THREE.ConeGeometry(0.3, 1.5, 6);
+        const protrusion = new THREE.Mesh(protrusionGeo, boneMat);
+        protrusion.position.copy(point);
+        protrusion.position.z += (isLeft ? -0.5 : 0.5);
+        protrusion.rotation.x = isLeft ? -Math.PI / 4 : Math.PI / 4;
+        group.add(protrusion);
+    }
+
+    return group;
+}
+
+/**
+ * Creates a Barnacle - harvestable object containing Memory Fragments
+ */
+function createBarnacle(): THREE.Mesh {
+    const size = 0.3 + Math.random() * 0.5;
+    const barnacleGeo = new THREE.DodecahedronGeometry(size, 0);
+    const barnacleMat = new THREE.MeshStandardMaterial({
+        color: 0x556677,
+        roughness: 0.95,
+        metalness: 0.1,
+        emissive: 0x223344,
+        emissiveIntensity: 0.2
+    });
+    
+    const barnacle = new THREE.Mesh(barnacleGeo, barnacleMat);
+    barnacle.castShadow = true;
+    barnacle.userData = {
+        type: 'barnacle',
+        hasMemoryFragment: Math.random() < 0.3, // 30% chance
+        collected: false
+    };
+
+    return barnacle;
+}
+
+/**
+ * Updates pistons with sin-wave animation
+ */
+function updatePistons(time: number) {
+    pistons.forEach(piston => {
+        if (!piston.userData || piston.userData.type !== 'piston') return;
+
+        const data = piston.userData;
+        const phase = time * data.cycleSpeed + data.phase;
+        const offset = Math.sin(phase) * data.stroke;
+
+        // Update head position
+        if (data.head) {
+            data.head.position.y = data.baseY + offset;
+        }
+
+        // Update shaft to stretch
+        if (data.shaft) {
+            const shaftLength = 4 + offset;
+            data.shaft.scale.y = shaftLength / 4;
+            data.shaft.position.y = data.baseY + offset / 2 + 2.5;
+        }
+    });
+}
+
+/**
+ * Updates blast doors (simple pulsing warning light for now)
+ */
+function updateBlastDoors(time: number) {
+    blastDoors.forEach(door => {
+        if (!door.userData || door.userData.type !== 'blastDoor') return;
+
+        const data = door.userData;
+        
+        // Pulse warning light
+        if (data.warningLight) {
+            const pulse = Math.sin(time * 4) * 0.5 + 0.5;
+            const mat = data.warningLight.material as THREE.MeshStandardMaterial;
+            mat.emissiveIntensity = 1.0 + pulse * 2.0;
+        }
+    });
+}
 
 class LevelManager {
     currentLevel: number;
@@ -345,7 +731,8 @@ class LevelManager {
                     magmaHeart: 2
                 },
                 speed: 6,
-                bgColor: 0x1a1a2e
+                bgColor: 0x1a1a2e,
+                levelType: 'open'
             },
             2: {
                 name: "The Asteroid Belt",
@@ -371,7 +758,8 @@ class LevelManager {
                     magmaHeart: 5
                 },
                 speed: 8,
-                bgColor: 0x2d1a1a // Reddish
+                bgColor: 0x2d1a1a, // Reddish
+                levelType: 'open'
             },
             3: {
                 name: "The Deep Void",
@@ -397,7 +785,69 @@ class LevelManager {
                     magmaHeart: 8
                 },
                 speed: 10,
-                bgColor: 0x000000 // Pitch black
+                bgColor: 0x000000, // Pitch black
+                levelType: 'open'
+            },
+            4: {
+                name: "The Rusty Gauntlet",
+                distance: 3200, // Start after Deep Void
+                asteroidRate: 2.0, // Fewer asteroids in tunnels
+                foliageDensity: {
+                    // Minimal foliage in industrial environment
+                    fern: 0,
+                    rose: 0,
+                    lotus: 0,
+                    glowingFlower: 5,
+                    tree: 0,
+                    floweringTree: 0,
+                    shrub: 0,
+                    vine: 0,
+                    orb: 15,
+                    mushroom: 0,
+                    cloud: 5,
+                    // Industrial hazards
+                    voidRootBall: 0,
+                    vacuumKelp: 0,
+                    iceNeedle: 0,
+                    liquidMetal: 5,
+                    magmaHeart: 3
+                },
+                speed: 12,
+                bgColor: 0x1a1008, // Dark orange-brown industrial
+                levelType: 'tunnel',
+                tunnelHeight: 15,
+                obstacleInterval: 20 // Spawn structural section every 20m
+            },
+            5: {
+                name: "The Astral Leviathan",
+                distance: 4200, // Final level
+                asteroidRate: 2.5, // Very few asteroids inside whale
+                foliageDensity: {
+                    // Organic growth in whale
+                    fern: 5,
+                    rose: 0,
+                    lotus: 15,
+                    glowingFlower: 20,
+                    tree: 0,
+                    floweringTree: 0,
+                    shrub: 0,
+                    vine: 10,
+                    orb: 30, // Ghostly orbs
+                    mushroom: 8,
+                    cloud: 15, // Memory fog
+                    // Organic hazards
+                    voidRootBall: 5,
+                    vacuumKelp: 8,
+                    iceNeedle: 0,
+                    liquidMetal: 0,
+                    magmaHeart: 0
+                },
+                speed: 10,
+                bgColor: 0x0a0810, // Deep purple-blue organic
+                levelType: 'organic_tunnel',
+                tunnelHeight: 20,
+                obstacleInterval: 25, // Spawn rib section every 25m
+                fogDensity: 0.08 // Dense Memory Fog
             }
         };
 
@@ -416,7 +866,23 @@ class LevelManager {
         playerState.autoScrollSpeed = cfg.speed;
         playerState.distanceToMoon = cfg.distance;
         scene.background = new THREE.Color(cfg.bgColor);
-        if (scene.fog) scene.fog.color = new THREE.Color(cfg.bgColor);
+        if (scene.fog) {
+            scene.fog.color = new THREE.Color(cfg.bgColor);
+            // Apply custom fog density for Memory Fog effect (Level 5)
+            if (scene.fog instanceof THREE.Fog) {
+                if (cfg.fogDensity) {
+                    // Adjust fog near/far based on density (higher density = closer fog)
+                    const baseFar = 80;
+                    const baseNear = 20;
+                    scene.fog.far = baseFar * (1 - cfg.fogDensity * 5);
+                    scene.fog.near = baseNear * (1 - cfg.fogDensity * 3);
+                } else {
+                    // Reset to default fog
+                    scene.fog.far = 80;
+                    scene.fog.near = 20;
+                }
+            }
+        }
 
         // Update UI
         const levelDiv = document.getElementById('level-display');
@@ -426,17 +892,60 @@ class LevelManager {
         // actually we just keep scrolling, but we need to spawn new density ahead
 
         // Populate new zone ahead of player
-        this.populateZone(player.position.x + 50, player.position.x + 600, cfg.foliageDensity);
+        this.populateZone(player.position.x + 50, player.position.x + 600, cfg);
     }
 
-    populateZone(startX: number, endX: number, density: LevelConfig['foliageDensity']) {
+    populateZone(startX: number, endX: number, config: LevelConfig) {
         const width = endX - startX;
+        const density = config.foliageDensity;
+        const levelType = config.levelType || 'open';
 
+        // For tunnel levels, spawn structural sections at fixed intervals
+        if (levelType === 'tunnel') {
+            const interval = config.obstacleInterval || 20;
+            const sectionCount = Math.floor(width / interval);
+            
+            for (let i = 0; i < sectionCount; i++) {
+                const xPos = startX + i * interval;
+                createIndustrialSection(xPos);
+            }
+            
+            // Spawn minimal foliage inside tunnel bounds (constrained Y range)
+            const tunnelHeight = config.tunnelHeight || 15;
+            const yRange: [number, number] = [-tunnelHeight / 2 + 2, tunnelHeight / 2 - 2];
+            
+            this.spawnOpenFoliage(startX, width, density, yRange);
+            return;
+        }
+        
+        if (levelType === 'organic_tunnel') {
+            const interval = config.obstacleInterval || 25;
+            const sectionCount = Math.floor(width / interval);
+            
+            for (let i = 0; i < sectionCount; i++) {
+                const xPos = startX + i * interval;
+                createWhaleRibSection(xPos);
+            }
+            
+            // Spawn organic foliage inside whale bounds
+            const tunnelHeight = config.tunnelHeight || 20;
+            const yRange: [number, number] = [-tunnelHeight / 2 + 3, tunnelHeight / 2 - 3];
+            
+            this.spawnOpenFoliage(startX, width, density, yRange);
+            return;
+        }
+
+        // Default 'open' level type - use existing random scatter logic
+        this.spawnOpenFoliage(startX, width, density);
+    }
+
+    // Helper method to spawn foliage with open scatter logic
+    spawnOpenFoliage(startX: number, width: number, density: LevelConfig['foliageDensity'], yRange: [number, number] = [-20, 20]) {
         // Helper to spawn
-        const spawn = (count: number, creatorFn: () => THREE.Object3D, yRange = [-20, 20], zRange = [-30, 0]) => {
+        const spawn = (count: number, creatorFn: () => THREE.Object3D, customYRange = yRange, zRange: [number, number] = [-30, 0]) => {
             for (let i = 0; i < count; i++) {
                 const x = startX + Math.random() * width;
-                const y = yRange[0] + Math.random() * (yRange[1] - yRange[0]);
+                const y = customYRange[0] + Math.random() * (customYRange[1] - customYRange[0]);
                 const z = zRange[0] + Math.random() * (zRange[1] - zRange[0]);
 
                 const obj = creatorFn();
@@ -460,19 +969,19 @@ class LevelManager {
         if (density.lotus) spawn(density.lotus, () => createSubwooferLotus({ color: 0x00ff88 }));
         if (density.glowingFlower) spawn(density.glowingFlower, () => createGlowingFlower({ color: 0x00ffff, intensity: 2.0 }));
 
-        // Standard foliage
-        if (density.tree) spawn(density.tree, () => createFloweringTree({ color: 0x44ffaa }), [-20, -5]); // Trees lower
-        if (density.floweringTree) spawn(density.floweringTree, () => createFloweringTree({ color: 0xffaa44 }), [-20, -5]);
+        // Standard foliage (trees at lower positions)
+        const treeYRange: [number, number] = [Math.max(yRange[0], -20), Math.min(yRange[1], -5)];
+        if (density.tree) spawn(density.tree, () => createFloweringTree({ color: 0x44ffaa }), treeYRange);
+        if (density.floweringTree) spawn(density.floweringTree, () => createFloweringTree({ color: 0xffaa44 }), treeYRange);
 
         // Floating items
-        if (density.orb) spawn(density.orb, () => createFloatingOrb({ color: 0x88ccff }), [-10, 20]);
-        // Note: Clouds handled specifically below
+        if (density.orb) spawn(density.orb, () => createFloatingOrb({ color: 0x88ccff }), yRange);
 
         // Add clouds manually because they need the specific class wrapper
         if (density.cloud) {
-             for(let i=0; i<density.cloud; i++) {
+            for(let i=0; i<density.cloud; i++) {
                 const x = startX + Math.random() * width;
-                const y = (Math.random() - 0.5) * 30;
+                const y = yRange[0] + Math.random() * (yRange[1] - yRange[0]);
                 const z = -40 + Math.random() * 30;
                 createSporeCloudAtPosition(x, y, z);
             }
@@ -482,7 +991,7 @@ class LevelManager {
         if (density.voidRootBall) {
             for(let i=0; i<density.voidRootBall; i++) {
                 const x = startX + Math.random() * width;
-                const y = (Math.random() - 0.5) * 25;
+                const y = yRange[0] + Math.random() * (yRange[1] - yRange[0]);
                 const z = -35 + Math.random() * 25;
                 createVoidRootBallAtPosition(x, y, z);
             }
@@ -491,7 +1000,7 @@ class LevelManager {
         if (density.vacuumKelp) {
             for(let i=0; i<density.vacuumKelp; i++) {
                 const x = startX + Math.random() * width;
-                const y = -20 + Math.random() * 15; // Lower, growing upward
+                const y = yRange[0] + Math.random() * 15;
                 const z = -35 + Math.random() * 25;
                 createVacuumKelpAtPosition(x, y, z);
             }
@@ -500,7 +1009,7 @@ class LevelManager {
         if (density.iceNeedle) {
             for(let i=0; i<density.iceNeedle; i++) {
                 const x = startX + Math.random() * width;
-                const y = (Math.random() - 0.5) * 30;
+                const y = yRange[0] + Math.random() * (yRange[1] - yRange[0]);
                 const z = -35 + Math.random() * 25;
                 createIceNeedleClusterAtPosition(x, y, z);
             }
@@ -509,7 +1018,7 @@ class LevelManager {
         if (density.liquidMetal) {
             for(let i=0; i<density.liquidMetal; i++) {
                 const x = startX + Math.random() * width;
-                const y = (Math.random() - 0.5) * 25;
+                const y = yRange[0] + Math.random() * (yRange[1] - yRange[0]);
                 const z = -35 + Math.random() * 25;
                 createLiquidMetalBlobAtPosition(x, y, z);
             }
@@ -518,7 +1027,7 @@ class LevelManager {
         if (density.magmaHeart) {
             for(let i=0; i<density.magmaHeart; i++) {
                 const x = startX + Math.random() * width;
-                const y = (Math.random() - 0.5) * 25;
+                const y = yRange[0] + Math.random() * (yRange[1] - yRange[0]);
                 const z = -35 + Math.random() * 25;
                 createMagmaHeartAtPosition(x, y, z);
             }
@@ -531,6 +1040,10 @@ class LevelManager {
             this.startLevel(2);
         } else if (this.currentLevel === 2 && playerX > 1200) {
             this.startLevel(3);
+        } else if (this.currentLevel === 3 && playerX > 2200) {
+            this.startLevel(4);
+        } else if (this.currentLevel === 4 && playerX > 3200) {
+            this.startLevel(5);
         }
     }
 }
@@ -1492,6 +2005,10 @@ function animate() {
     iceNeedleClusters.forEach(cluster => updateIceNeedleCluster(cluster, delta, time));
     liquidMetalBlobs.forEach(blob => updateLiquidMetalBlob(blob, delta, time));
     magmaHearts.forEach(heart => updateMagmaHeart(heart, delta, time));
+
+    // Update industrial obstacles (Level 4)
+    updatePistons(time);
+    updateBlastDoors(time);
 
     // Rotate galaxies slowly
     if (galaxy1) galaxy1.rotation.z += galaxy1.userData.rotationSpeed;
