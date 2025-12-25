@@ -322,6 +322,16 @@ type LevelConfig = {
 // INDUSTRIAL TUNNEL GEOMETRY (Level 4: The Rusty Gauntlet)
 // =============================================================================
 
+// Obstacle spawn probability constants
+const PISTON_SPAWN_CHANCE = 0.4;
+const BLAST_DOOR_SPAWN_CHANCE = 0.6;
+
+// Fog configuration defaults
+const DEFAULT_FOG_FAR = 80;
+const DEFAULT_FOG_NEAR = 20;
+const FOG_FAR_DENSITY_FACTOR = 5;
+const FOG_NEAR_DENSITY_FACTOR = 3;
+
 // Track industrial sections and pistons for updates
 const industrialSections: THREE.Group[] = [];
 const pistons: THREE.Group[] = [];
@@ -375,12 +385,12 @@ function createIndustrialSection(xPos: number): THREE.Group {
 
     // Randomly spawn obstacles: Piston or Blast Door
     const obstacleChance = Math.random();
-    if (obstacleChance < 0.4) {
+    if (obstacleChance < PISTON_SPAWN_CHANCE) {
         // Spawn a Piston
         const piston = createPiston(0, tunnelHeight);
         group.add(piston);
         pistons.push(piston);
-    } else if (obstacleChance < 0.6) {
+    } else if (obstacleChance < BLAST_DOOR_SPAWN_CHANCE) {
         // Spawn a Blast Door
         const door = createBlastDoor(sectionLength / 2, tunnelHeight);
         group.add(door);
@@ -872,14 +882,12 @@ class LevelManager {
             if (scene.fog instanceof THREE.Fog) {
                 if (cfg.fogDensity) {
                     // Adjust fog near/far based on density (higher density = closer fog)
-                    const baseFar = 80;
-                    const baseNear = 20;
-                    scene.fog.far = baseFar * (1 - cfg.fogDensity * 5);
-                    scene.fog.near = baseNear * (1 - cfg.fogDensity * 3);
+                    scene.fog.far = DEFAULT_FOG_FAR * (1 - cfg.fogDensity * FOG_FAR_DENSITY_FACTOR);
+                    scene.fog.near = DEFAULT_FOG_NEAR * (1 - cfg.fogDensity * FOG_NEAR_DENSITY_FACTOR);
                 } else {
                     // Reset to default fog
-                    scene.fog.far = 80;
-                    scene.fog.near = 20;
+                    scene.fog.far = DEFAULT_FOG_FAR;
+                    scene.fog.near = DEFAULT_FOG_NEAR;
                 }
             }
         }
