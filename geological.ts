@@ -19,6 +19,7 @@ export function createNebulaJellyMoss(options: any = {}) {
 
     // 2. Inner Fractal Moss (Shader-based instances)
     const mossLayers = 3;
+    const cores = [];
     for (let i = 0; i < mossLayers; i++) {
         const layerSize = size * (0.3 + i * 0.2);
         const mossGeo = new THREE.IcosahedronGeometry(layerSize, 4); // More detail
@@ -30,6 +31,7 @@ export function createNebulaJellyMoss(options: any = {}) {
         moss.userData.rotationSpeed = (Math.random() - 0.5) * 0.5;
         moss.userData.layer = i;
         group.add(moss);
+        cores.push(moss);
     }
 
     // Store animation data
@@ -38,6 +40,7 @@ export function createNebulaJellyMoss(options: any = {}) {
         pulsePhase: Math.random() * Math.PI * 2,
         driftSpeed: 0.2 + Math.random() * 0.3,
         membrane: membrane,
+        cores: cores, // Expose cores for harvesting logic
         baseSize: size,
         health: 1.0,
         isHiding: false,
@@ -91,10 +94,8 @@ export function updateNebulaJellyMoss(jellyMoss: THREE.Group, delta: number, tim
 
         // Stealth effect (opacity)
         if (data.isHiding) {
-             // Lower opacity
-             // Since TSL material structure is complex, we assume we set 'opacity' on material properties for blending?
-             // Or update the colorNode alpha.
-             // The 'uPulse' also affects opacity in our shader.
+             // If player is hiding inside, maybe pulse faster or change color
+             // The visual effect on the PLAYER is handled in main.ts
         }
     }
 
@@ -151,6 +152,10 @@ export class SporeCloud {
         this.mesh = new THREE.InstancedMesh(sporeGeo, sporeMat, sporeCount);
         this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); // We will update it
         this.mesh.position.copy(position);
+
+        // This is key for the "collect spores" logic in main.ts if we iterate instances
+        // We set userData on the mesh to reference this class instance
+        this.mesh.userData = { parentCloud: this };
 
         // Initialize data
         this.velocities = new Float32Array(sporeCount * 3);

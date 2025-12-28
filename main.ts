@@ -1128,35 +1128,83 @@ function updateObstacles(delta: number) {
     }
 
     // C. Update WASM Memory & Call Collision Check
-    if (wasmExports && obstacles.length > 0) {
-        // 1. Allocate space (returns pointer to existing or new buffer)
-        const ptr = wasmExports.allocAsteroids(obstacles.length);
+    if (wasmExports) {
+        // --- ASTEROIDS ---
+        if (obstacles.length > 0) {
+            // 1. Allocate space (returns pointer to existing or new buffer)
+            const ptr = wasmExports.allocAsteroids(obstacles.length);
 
-        // 2. Update view if memory grew or changed (simple check)
-        // Note: In a real high-perf scenario we'd cache the view and only update if buffer.byteLength changed
-        // But here we need to be safe.
-        if (!wasmMemory || wasmMemory.buffer !== wasmExports.memory.buffer) {
-            wasmMemory = new Float32Array(wasmExports.memory.buffer);
+            // 2. Update view if memory grew or changed (simple check)
+            if (!wasmMemory || wasmMemory.buffer !== wasmExports.memory.buffer) {
+                wasmMemory = new Float32Array(wasmExports.memory.buffer);
+            }
+
+            // 3. Write data to WASM memory
+            const startIdx = ptr >>> 2;
+            for (let i = 0; i < obstacles.length; i++) {
+                const obs = obstacles[i];
+                const offset = startIdx + (i * 3);
+                wasmMemory[offset] = obs.position.x;
+                wasmMemory[offset + 1] = obs.position.y;
+                wasmMemory[offset + 2] = obs.userData.radius || 1.0;
+            }
+
+            // 4. Check collision
+            const hitIndex = wasmExports.checkCollision(playerX, playerY, 0.5, obstacles.length);
+
+            if (hitIndex !== -1) {
+                handleCollision(hitIndex);
+            }
         }
 
-        // 3. Write data to WASM memory
-        // Ptr is in bytes, Float32Array uses index (bytes / 4)
-        const startIdx = ptr >>> 2;
-        for (let i = 0; i < obstacles.length; i++) {
-            const obs = obstacles[i];
-            const offset = startIdx + (i * 3);
-            wasmMemory[offset] = obs.position.x;
-            wasmMemory[offset + 1] = obs.position.y;
-            wasmMemory[offset + 2] = obs.userData.radius || 1.0;
-        }
+        // --- SPORE CLOUDS (WASM INTEGRATION) ---
+        // Filter cloud candidates (near player to save bandwidth)
+        const nearbyClouds = sporeClouds.filter(c => c.active && Math.abs(c.position.x - playerX) < 20);
 
-        // 4. Check collision
-        // checkCollision(playerX, playerY, playerRadius, count)
-        const hitIndex = wasmExports.checkCollision(playerX, playerY, 0.5, obstacles.length);
+        if (nearbyClouds.length > 0) {
+            // 1. Allocate
+            const cloudPtr = wasmExports.allocSporeClouds(nearbyClouds.length);
 
-        // D. Handle Hit
-        if (hitIndex !== -1) {
-            handleCollision(hitIndex);
+            // 2. Update view
+            if (!wasmMemory || wasmMemory.buffer !== wasmExports.memory.buffer) {
+                wasmMemory = new Float32Array(wasmExports.memory.buffer);
+            }
+
+            // 3. Write Cloud Data (x, y, z, radius)
+            // Assuming cloud radius ~5 for collection purposes
+            const cloudStartIdx = cloudPtr >>> 2;
+            for(let i=0; i<nearbyClouds.length; i++) {
+                const c = nearbyClouds[i];
+                const offset = cloudStartIdx + (i * 4);
+                wasmMemory[offset] = c.position.x;
+                wasmMemory[offset+1] = c.position.y;
+                wasmMemory[offset+2] = c.position.z;
+                wasmMemory[offset+3] = 5.0; // Hardcoded cloud radius for collection
+            }
+
+            // 4. Check Collision (3D)
+            const playerZ = 0; // Player is fixed at Z=0
+            const cloudHitIndex = wasmExports.checkSporeCollision(playerX, playerY, playerZ, 1.0, nearbyClouds.length);
+
+            if (cloudHitIndex !== -1) {
+                // We hit a cloud!
+                const hitCloud = nearbyClouds[cloudHitIndex];
+
+                // Visual feedback for entering a cloud
+                // (Only trigger once per cloud entry to avoid spam)
+                if (!hitCloud.mesh.userData.playerInside) {
+                    hitCloud.mesh.userData.playerInside = true;
+                    // console.log("Entered Spore Cloud!");
+
+                    // Emit some particles around player
+                    particleSystem.emit(player.position.clone(), 0x88ff88, 5, 2.0, 0.5, 1.0);
+
+                    // Maybe play sound or screen effect here
+                }
+            } else {
+                 // Reset 'inside' state for all nearby
+                 nearbyClouds.forEach(c => { c.mesh.userData.playerInside = false; });
+            }
         }
     }
 }
