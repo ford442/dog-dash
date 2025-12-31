@@ -11,27 +11,100 @@ export function createNebulaJellyMoss(options: any = {}) {
     const { size = 5, color = 0x44ff88 } = options;
     const group = new THREE.Group();
 
-    // 1. Gelatinous Membrane (Shader-based)
-    const membraneGeo = new THREE.SphereGeometry(size, 64, 64); // Higher poly for wobble
+    // 1. Gelatinous Membrane (Shader-based) - higher detail
+    const membraneGeo = new THREE.SphereGeometry(size, 64, 64);
     const membraneMat = createJellyMembraneMaterial(0x88ffaa);
     const membrane = new THREE.Mesh(membraneGeo, membraneMat);
+    membrane.receiveShadow = true;
     group.add(membrane);
 
-    // 2. Inner Fractal Moss (Shader-based instances)
-    const mossLayers = 3;
+    // 2. Inner Fractal Moss (Shader-based instances) - more layers
+    const mossLayers = 4;
     const cores = [];
     for (let i = 0; i < mossLayers; i++) {
-        const layerSize = size * (0.3 + i * 0.2);
-        const mossGeo = new THREE.IcosahedronGeometry(layerSize, 4); // More detail
+        const layerSize = size * (0.25 + i * 0.18);
+        const mossGeo = new THREE.IcosahedronGeometry(layerSize, 3); // Higher detail
 
         // Use custom shader material for moss
         const mossMat = createJellyMossMaterial(color);
 
         const moss = new THREE.Mesh(mossGeo, mossMat);
-        moss.userData.rotationSpeed = (Math.random() - 0.5) * 0.5;
+        moss.userData.rotationSpeed = (Math.random() - 0.5) * 0.6;
         moss.userData.layer = i;
+        moss.userData.baseScale = 1.0;
         group.add(moss);
         cores.push(moss);
+    }
+
+    // 3. Add tendril-like structures extending from core
+    const tendrilCount = 5;
+    const tendrils = [];
+    for (let i = 0; i < tendrilCount; i++) {
+        const tendrilLength = size * (0.5 + Math.random() * 0.5);
+        const segments = 6;
+        const points: THREE.Vector3[] = [];
+        
+        const angle = (i / tendrilCount) * Math.PI * 2;
+        const startRadius = size * 0.6;
+        
+        for (let j = 0; j <= segments; j++) {
+            const t = j / segments;
+            const curvature = Math.sin(t * Math.PI) * 0.3;
+            const radius = startRadius + t * tendrilLength;
+            
+            points.push(new THREE.Vector3(
+                Math.cos(angle) * radius + curvature,
+                Math.sin(angle) * radius + curvature,
+                (Math.random() - 0.5) * tendrilLength * 0.2
+            ));
+        }
+        
+        const curve = new THREE.CatmullRomCurve3(points);
+        const tubeGeo = new THREE.TubeGeometry(curve, segments * 2, 0.12, 6, false);
+        const tubeMat = new THREE.MeshStandardMaterial({
+            color: 0x66dd99,
+            transparent: true,
+            opacity: 0.6,
+            emissive: color,
+            emissiveIntensity: 0.3
+        });
+        
+        const tendril = new THREE.Mesh(tubeGeo, tubeMat);
+        tendril.userData.baseAngle = angle;
+        tendril.userData.waveOffset = Math.random() * Math.PI * 2;
+        tendrils.push(tendril);
+        group.add(tendril);
+    }
+
+    // 4. Add bioluminescent spots
+    const spotCount = 12;
+    const spots = [];
+    for (let i = 0; i < spotCount; i++) {
+        const spotGeo = new THREE.SphereGeometry(0.15, 8, 8);
+        const spotMat = new THREE.MeshStandardMaterial({
+            color: color,
+            emissive: color,
+            emissiveIntensity: 2.0,
+            transparent: true,
+            opacity: 0.8
+        });
+        
+        const spot = new THREE.Mesh(spotGeo, spotMat);
+        
+        // Random position on membrane surface
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.random() * Math.PI;
+        const r = size * 0.95;
+        
+        spot.position.set(
+            r * Math.sin(phi) * Math.cos(theta),
+            r * Math.sin(phi) * Math.sin(theta),
+            r * Math.cos(phi)
+        );
+        
+        spot.userData.pulseOffset = Math.random() * Math.PI * 2;
+        spots.push(spot);
+        group.add(spot);
     }
 
     // Store animation data
@@ -40,7 +113,9 @@ export function createNebulaJellyMoss(options: any = {}) {
         pulsePhase: Math.random() * Math.PI * 2,
         driftSpeed: 0.2 + Math.random() * 0.3,
         membrane: membrane,
-        cores: cores, // Expose cores for harvesting logic
+        cores: cores,
+        tendrils: tendrils,
+        spots: spots,
         baseSize: size,
         health: 1.0,
         isHiding: false,
@@ -70,14 +145,12 @@ export function updateNebulaJellyMoss(jellyMoss: THREE.Group, delta: number, tim
 
     const pulseTime = time + data.pulsePhase;
 
-    // Pulse animation (3s cycle)
+    // Enhanced pulse animation (3s cycle)
     const pulse = Math.sin(pulseTime * (Math.PI * 2 / 3)) * 0.5 + 0.5;
+    const fastPulse = Math.sin(pulseTime * (Math.PI * 4 / 3)) * 0.5 + 0.5;
 
     // Update membrane uniforms (Shader Node update happens automatically via time node,
     // but we can update uniforms like uPulse manually if we want game logic influence)
-
-    // Note: With TSL, 'time' node handles animation automatically on GPU.
-    // We only need to update logic-based uniforms.
 
     const membrane = data.membrane as THREE.Mesh;
     if (membrane && membrane.material) {
@@ -99,11 +172,16 @@ export function updateNebulaJellyMoss(jellyMoss: THREE.Group, delta: number, tim
         }
     }
 
-    // Counter-rotate moss layers
+    // Counter-rotate moss layers with varied speeds
     jellyMoss.children.forEach((child, i) => {
         if (child.userData.layer !== undefined) {
             child.rotation.y += child.userData.rotationSpeed * delta;
             child.rotation.x += child.userData.rotationSpeed * 0.5 * delta;
+            child.rotation.z += child.userData.rotationSpeed * 0.3 * delta;
+
+            // Pulse scale
+            const layerPulse = Math.sin(pulseTime + child.userData.layer * 0.5) * 0.5 + 0.5;
+            child.scale.setScalar(1.0 + layerPulse * 0.08);
 
             // Update moss pulse uniform
             const mat = (child as THREE.Mesh).material as THREE.Material;
@@ -113,9 +191,36 @@ export function updateNebulaJellyMoss(jellyMoss: THREE.Group, delta: number, tim
         }
     });
 
-    // Sine-wave drifting
+    // Animate tendrils with wave motion
+    if (data.tendrils) {
+        data.tendrils.forEach((tendril: THREE.Mesh, i: number) => {
+            const wave = Math.sin(pulseTime + tendril.userData.waveOffset) * 0.15;
+            tendril.rotation.z = wave;
+            
+            // Pulse emissive
+            const mat = tendril.material as THREE.MeshStandardMaterial;
+            mat.emissiveIntensity = 0.3 + fastPulse * 0.3;
+        });
+    }
+    
+    // Animate bioluminescent spots
+    if (data.spots) {
+        data.spots.forEach((spot: THREE.Mesh, i: number) => {
+            const spotPulse = Math.sin(pulseTime * 2 + spot.userData.pulseOffset) * 0.5 + 0.5;
+            const mat = spot.material as THREE.MeshStandardMaterial;
+            mat.emissiveIntensity = 1.5 + spotPulse * 1.0;
+            spot.scale.setScalar(0.9 + spotPulse * 0.3);
+        });
+    }
+
+    // Enhanced sine-wave drifting with multi-axis movement
     const driftOffset = Math.sin(time * 0.5 + data.pulsePhase) * data.driftSpeed;
+    const driftOffsetZ = Math.cos(time * 0.3 + data.pulsePhase) * data.driftSpeed * 0.5;
     jellyMoss.position.y += driftOffset * delta;
+    jellyMoss.position.z += driftOffsetZ * delta;
+    
+    // Gentle rotation
+    jellyMoss.rotation.y += delta * 0.1;
 }
 
 // --- Spore Clouds (InstancedMesh) ---
@@ -316,57 +421,91 @@ export function createChromaShiftRock(options: any = {}) {
     const { size = 2, color = 0x8844ff } = options;
     const group = new THREE.Group();
 
-    // Main rock body
-    const rockGeo = new THREE.DodecahedronGeometry(size, 1);
+    // Main rock body - higher detail with more subdivision
+    const rockGeo = new THREE.IcosahedronGeometry(size, 2);
+    
+    // Add some random deformation for more organic look
+    const positions = rockGeo.attributes.position;
+    for (let i = 0; i < positions.count; i++) {
+        const x = positions.getX(i);
+        const y = positions.getY(i);
+        const z = positions.getZ(i);
+        const noise = (Math.random() - 0.5) * 0.3;
+        positions.setXYZ(i, x * (1 + noise), y * (1 + noise), z * (1 + noise));
+    }
+    rockGeo.computeVertexNormals();
 
     // Custom material with distance-based color shift
     const rockMat = new THREE.MeshStandardMaterial({
         color: color,
-        roughness: 0.8,
-        metalness: 0.3,
+        roughness: 0.7,
+        metalness: 0.4,
         emissive: color,
-        emissiveIntensity: 0.2
+        emissiveIntensity: 0.3,
+        flatShading: true // More crystalline look
     });
 
     const rock = new THREE.Mesh(rockGeo, rockMat);
     rock.castShadow = true;
+    rock.receiveShadow = true;
 
-    // Add some crystal shards
-    const shardCount = 3 + Math.floor(Math.random() * 5);
+    // Add crystal shards with more variety
+    const shardCount = 5 + Math.floor(Math.random() * 8);
     for (let i = 0; i < shardCount; i++) {
-        const shardGeo = new THREE.ConeGeometry(0.2, 0.8, 6);
+        const shardHeight = 0.5 + Math.random() * 1.2;
+        const shardRadius = 0.15 + Math.random() * 0.25;
+        const shardGeo = new THREE.ConeGeometry(shardRadius, shardHeight, 6);
         const shardMat = new THREE.MeshStandardMaterial({
             color: 0xaaaaff,
             emissive: 0x6666ff,
-            emissiveIntensity: 0.5,
+            emissiveIntensity: 0.8,
             transparent: true,
-            opacity: 0.8
+            opacity: 0.85,
+            roughness: 0.2,
+            metalness: 0.6
         });
 
         const shard = new THREE.Mesh(shardGeo, shardMat);
 
-        // Random position on surface
+        // Random position on surface with clustering
         const theta = Math.random() * Math.PI * 2;
         const phi = Math.random() * Math.PI;
+        const r = size * (0.95 + Math.random() * 0.2);
         shard.position.set(
-            size * Math.sin(phi) * Math.cos(theta),
-            size * Math.sin(phi) * Math.sin(theta),
-            size * Math.cos(phi)
+            r * Math.sin(phi) * Math.cos(theta),
+            r * Math.sin(phi) * Math.sin(theta),
+            r * Math.cos(phi)
         );
         shard.lookAt(0, 0, 0);
         shard.rotateX(-Math.PI / 2);
+        
+        // Random rotation for variation
+        shard.rotation.z = Math.random() * Math.PI * 2;
 
         rock.add(shard);
     }
 
     group.add(rock);
 
+    // Add subtle glow aura
+    const glowGeo = new THREE.IcosahedronGeometry(size * 1.15, 1);
+    const glowMat = new THREE.MeshBasicMaterial({
+        color: color,
+        transparent: true,
+        opacity: 0.1,
+        blending: THREE.AdditiveBlending,
+        side: THREE.BackSide
+    });
+    const glow = new THREE.Mesh(glowGeo, glowMat);
+    group.add(glow);
+
     // Store animation data
     group.userData = {
         type: 'chromaRock',
         originalColor: color,
-        baseEmissive: 0.2,
+        baseEmissive: 0.3,
         rock: rock,
+        glow: glow,
         timeOffset: Math.random() * 100
     };
 
@@ -381,20 +520,29 @@ export function updateChromaRock(rock: THREE.Group, cameraPosition: THREE.Vector
     const maxDistance = 50;
     const normalizedDist = Math.min(distance / maxDistance, 1.0);
 
-    // Shift hue based on distance and time
+    // Shift hue based on distance and time with more vibrant colors
     const timeValue = time + rock.userData.timeOffset;
-    const hue = (normalizedDist * 0.3 + timeValue * 0.1) % 1.0;
-    const color = new THREE.Color().setHSL(hue, 0.8, 0.5);
+    const hue = (normalizedDist * 0.4 + timeValue * 0.15) % 1.0;
+    const color = new THREE.Color().setHSL(hue, 0.9, 0.6);
 
     const rockMesh = rock.userData.rock as THREE.Mesh;
     if (rockMesh && rockMesh.material) {
-        (rockMesh.material as THREE.MeshStandardMaterial).emissive.lerp(color, 0.05);
-        (rockMesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.2 + Math.sin(timeValue) * 0.1;
+        (rockMesh.material as THREE.MeshStandardMaterial).emissive.lerp(color, 0.1);
+        (rockMesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.3 + Math.sin(timeValue * 2) * 0.15;
     }
 
-    // Slow rotation
-    rock.rotation.y += delta * 0.2;
-    rock.rotation.x += delta * 0.1;
+    // Update glow with color and pulse
+    const glowMesh = rock.userData.glow as THREE.Mesh;
+    if (glowMesh && glowMesh.material) {
+        (glowMesh.material as THREE.MeshBasicMaterial).color.copy(color);
+        const glowPulse = Math.sin(timeValue * 3) * 0.5 + 0.5;
+        (glowMesh.material as THREE.MeshBasicMaterial).opacity = 0.05 + glowPulse * 0.15;
+    }
+
+    // Multi-axis rotation for more dynamic movement
+    rock.rotation.y += delta * 0.25;
+    rock.rotation.x += delta * 0.15;
+    rock.rotation.z += delta * 0.08;
 }
 
 // --- Fractured Geodes ---
@@ -402,38 +550,62 @@ export function createFracturedGeode(options: any = {}) {
     const { size = 4, color = 0x8844ff } = options;
     const group = new THREE.Group();
 
-    // Outer shell (fractured)
-    const shellGeo = new THREE.DodecahedronGeometry(size, 0);
+    // Outer shell (fractured) - more detailed
+    const shellGeo = new THREE.IcosahedronGeometry(size, 1);
+    
+    // Create fracture lines by randomly displacing some vertices
+    const positions = shellGeo.attributes.position;
+    for (let i = 0; i < positions.count; i++) {
+        if (Math.random() > 0.7) { // 30% of vertices displaced
+            const x = positions.getX(i);
+            const y = positions.getY(i);
+            const z = positions.getZ(i);
+            const offset = Math.random() * 0.2;
+            positions.setXYZ(i, x * (1 + offset), y * (1 + offset), z * (1 + offset));
+        }
+    }
+    shellGeo.computeVertexNormals();
+    
     const shellMat = new THREE.MeshStandardMaterial({
-        color: 0x666666,
-        roughness: 0.9,
-        metalness: 0.1
+        color: 0x555555,
+        roughness: 0.95,
+        metalness: 0.05,
+        flatShading: true
     });
     const shell = new THREE.Mesh(shellGeo, shellMat);
     shell.castShadow = true;
+    shell.receiveShadow = true;
     group.add(shell);
 
-    // Inner crystals
-    const crystalCount = 8 + Math.floor(Math.random() * 8);
+    // Inner crystals - more variety in size and arrangement
+    const crystalCount = 12 + Math.floor(Math.random() * 12);
+    const crystals: THREE.Mesh[] = [];
+    
     for (let i = 0; i < crystalCount; i++) {
-        const crystalSize = 0.3 + Math.random() * 0.7;
-        const crystalGeo = new THREE.ConeGeometry(crystalSize * 0.4, crystalSize, 6);
+        const crystalSize = 0.4 + Math.random() * 1.0;
+        const crystalGeo = new THREE.ConeGeometry(crystalSize * 0.5, crystalSize * 1.8, 6);
+        
+        // Vary crystal colors slightly
+        const hue = (color & 0xff) / 255;
+        const crystalColor = new THREE.Color().setHSL(hue, 0.8, 0.5 + Math.random() * 0.2);
+        
         const crystalMat = new THREE.MeshStandardMaterial({
-            color: color,
-            emissive: color,
-            emissiveIntensity: 1.5,
+            color: crystalColor,
+            emissive: crystalColor,
+            emissiveIntensity: 1.2 + Math.random() * 0.6,
             transparent: true,
-            opacity: 0.7,
-            roughness: 0.2,
-            metalness: 0.3
+            opacity: 0.75,
+            roughness: 0.15,
+            metalness: 0.4
         });
 
         const crystal = new THREE.Mesh(crystalGeo, crystalMat);
 
-        // Point inward from shell
-        const theta = Math.random() * Math.PI * 2;
+        // Point inward from shell in clusters
+        const clusterAngle = Math.floor(i / 3) * (Math.PI * 2 / 4); // 4 clusters
+        const theta = clusterAngle + (Math.random() - 0.5) * 0.8;
         const phi = Math.random() * Math.PI;
-        const r = size * 0.9;
+        const r = size * (0.85 + Math.random() * 0.15);
 
         crystal.position.set(
             r * Math.sin(phi) * Math.cos(theta),
@@ -442,25 +614,63 @@ export function createFracturedGeode(options: any = {}) {
         );
         crystal.lookAt(0, 0, 0);
         crystal.rotateX(-Math.PI / 2);
-
+        
+        crystals.push(crystal);
         group.add(crystal);
     }
 
-    // Add EM field glow
-    const glowGeo = new THREE.SphereGeometry(size * 1.3, 16, 16);
-    const glowMat = new THREE.MeshBasicMaterial({
-        color: color,
-        transparent: true,
-        opacity: 0.15,
-        blending: THREE.AdditiveBlending,
-        side: THREE.BackSide
-    });
-    const glow = new THREE.Mesh(glowGeo, glowMat);
-    group.add(glow);
+    // Add EM field glow - multiple layers for depth
+    const glowLayers = [];
+    for (let i = 0; i < 2; i++) {
+        const glowSize = size * (1.2 + i * 0.2);
+        const glowGeo = new THREE.SphereGeometry(glowSize, 16, 16);
+        const glowMat = new THREE.MeshBasicMaterial({
+            color: color,
+            transparent: true,
+            opacity: 0.1 / (i + 1),
+            blending: THREE.AdditiveBlending,
+            side: THREE.BackSide
+        });
+        const glow = new THREE.Mesh(glowGeo, glowMat);
+        glowLayers.push(glow);
+        group.add(glow);
+    }
+    
+    // Add energy arcs (simple lines that will pulse)
+    const arcCount = 3;
+    const arcs: THREE.Line[] = [];
+    for (let i = 0; i < arcCount; i++) {
+        const points: THREE.Vector3[] = [];
+        const segments = 8;
+        const angle = (i / arcCount) * Math.PI * 2;
+        
+        for (let j = 0; j <= segments; j++) {
+            const t = j / segments;
+            const radius = size * 1.3;
+            const offset = Math.sin(t * Math.PI) * 0.5;
+            points.push(new THREE.Vector3(
+                Math.cos(angle + t * Math.PI * 2) * radius + offset,
+                Math.sin(angle + t * Math.PI * 2) * radius + offset,
+                (t - 0.5) * size * 0.5
+            ));
+        }
+        
+        const arcGeo = new THREE.BufferGeometry().setFromPoints(points);
+        const arcMat = new THREE.LineBasicMaterial({
+            color: color,
+            transparent: true,
+            opacity: 0.3
+        });
+        const arc = new THREE.Line(arcGeo, arcMat);
+        arcs.push(arc);
+        group.add(arc);
+    }
 
     group.userData = {
         type: 'geode',
-        glow: glow,
+        glowLayers: glowLayers,
+        crystals: crystals,
+        arcs: arcs,
         baseColor: color,
         timeOffset: Math.random() * 100
     };
@@ -472,17 +682,39 @@ export function createFracturedGeode(options: any = {}) {
 export function updateGeode(geode: THREE.Group, delta: number, time: number) {
     if (!geode.userData || geode.userData.type !== 'geode') return;
 
-    const glow = geode.userData.glow as THREE.Mesh;
-    if (glow) {
-        // Pulse the EM field
-        const timeValue = time + geode.userData.timeOffset;
-        const pulse = Math.sin(timeValue * 2) * 0.5 + 0.5;
-        (glow.material as THREE.MeshBasicMaterial).opacity = 0.1 + pulse * 0.15;
-        glow.scale.setScalar(1 + pulse * 0.1);
+    const timeValue = time + geode.userData.timeOffset;
+    
+    // Pulse the EM field layers with different frequencies
+    if (geode.userData.glowLayers) {
+        geode.userData.glowLayers.forEach((glow: THREE.Mesh, i: number) => {
+            const frequency = 2 + i * 0.5;
+            const pulse = Math.sin(timeValue * frequency) * 0.5 + 0.5;
+            (glow.material as THREE.MeshBasicMaterial).opacity = (0.08 + pulse * 0.12) / (i + 1);
+            glow.scale.setScalar(1 + pulse * 0.08);
+        });
+    }
+    
+    // Animate crystals with individual pulsing
+    if (geode.userData.crystals) {
+        geode.userData.crystals.forEach((crystal: THREE.Mesh, i: number) => {
+            const pulse = Math.sin(timeValue * 2 + i * 0.5) * 0.5 + 0.5;
+            const mat = crystal.material as THREE.MeshStandardMaterial;
+            mat.emissiveIntensity = 1.2 + pulse * 0.6;
+        });
+    }
+    
+    // Animate energy arcs
+    if (geode.userData.arcs) {
+        geode.userData.arcs.forEach((arc: THREE.Line, i: number) => {
+            const arcPulse = Math.sin(timeValue * 3 + i * Math.PI * 2 / 3) * 0.5 + 0.5;
+            (arc.material as THREE.LineBasicMaterial).opacity = 0.2 + arcPulse * 0.4;
+            arc.rotation.z += delta * 0.3 * (i % 2 === 0 ? 1 : -1);
+        });
     }
 
     // Slow rotation
-    geode.rotation.y += delta * 0.1;
+    geode.rotation.y += delta * 0.15;
+    geode.rotation.x += delta * 0.08;
 }
 
 // --- Void Root Balls ---
@@ -772,55 +1004,87 @@ export function createIceNeedleCluster(options: any = {}) {
 
     for (let i = 0; i < count; i++) {
         const needleLength = 2 + Math.random() * 4;
-        const needleGeo = new THREE.ConeGeometry(0.1, needleLength, 6);
-        const needleMat = new THREE.MeshPhysicalMaterial({
-            color: color,
-            transparent: true,
-            opacity: 0.8,
-            roughness: 0.1,
-            metalness: 0.1,
-            transmission: 0.5,
-            thickness: 0.5,
-            ior: 1.31 // Ice refractive index
-        });
+        const needleRadius = 0.08 + Math.random() * 0.08;
         
-        const needle = new THREE.Mesh(needleGeo, needleMat);
+        // Create multi-segment needle for more detail
+        const segments = 3;
+        const needleGroup = new THREE.Group();
         
-        // Position in hexagonal grid pattern
+        for (let s = 0; s < segments; s++) {
+            const segmentLength = needleLength / segments;
+            const segmentRadius = needleRadius * (1 - s * 0.2);
+            const needleGeo = new THREE.ConeGeometry(segmentRadius, segmentLength, 8);
+            const needleMat = new THREE.MeshPhysicalMaterial({
+                color: color,
+                transparent: true,
+                opacity: 0.85,
+                roughness: 0.05,
+                metalness: 0.0,
+                transmission: 0.6,
+                thickness: 0.8,
+                ior: 1.31, // Ice refractive index
+                clearcoat: 1.0,
+                clearcoatRoughness: 0.1
+            });
+            
+            const segment = new THREE.Mesh(needleGeo, needleMat);
+            segment.position.y = s * segmentLength + segmentLength / 2;
+            needleGroup.add(segment);
+        }
+        
+        // Position in hexagonal grid pattern with some randomness
         const layer = Math.floor(i / 6);
         const angleInLayer = (i % 6) / 6 * Math.PI * 2;
-        const layerRadius = layer * 1.5;
+        const layerRadius = layer * 1.8 + Math.random() * 0.5;
         
-        needle.position.x = Math.cos(angleInLayer) * layerRadius;
-        needle.position.z = Math.sin(angleInLayer) * layerRadius;
-        needle.position.y = (Math.random() - 0.5) * 2;
+        needleGroup.position.x = Math.cos(angleInLayer) * layerRadius;
+        needleGroup.position.z = Math.sin(angleInLayer) * layerRadius;
+        needleGroup.position.y = (Math.random() - 0.5) * 1.5;
         
         // Random rotation for natural look
-        needle.rotation.x = (Math.random() - 0.5) * 0.5;
-        needle.rotation.z = (Math.random() - 0.5) * 0.5;
+        needleGroup.rotation.x = (Math.random() - 0.5) * 0.4 + Math.PI;
+        needleGroup.rotation.z = (Math.random() - 0.5) * 0.4;
         
-        needle.userData = {
+        needleGroup.userData = {
             health: 20,
             index: i,
-            basePosition: needle.position.clone()
+            basePosition: needleGroup.position.clone(),
+            baseRotation: needleGroup.rotation.clone()
         };
         
-        needles.push(needle);
-        group.add(needle);
+        needles.push(needleGroup as any);
+        group.add(needleGroup);
     }
 
-    // Optional frost heart at center
-    const frostHeartGeo = new THREE.IcosahedronGeometry(0.8, 1);
+    // Enhanced frost heart at center with crystalline structure
+    const frostHeartGeo = new THREE.IcosahedronGeometry(1.0, 2);
     const frostHeartMat = new THREE.MeshStandardMaterial({
         color: 0x88ccff,
         emissive: 0x4488ff,
-        emissiveIntensity: 1.5,
+        emissiveIntensity: 2.0,
         transparent: true,
-        opacity: 0.9
+        opacity: 0.95,
+        roughness: 0.2,
+        metalness: 0.3
     });
     
     const frostHeart = new THREE.Mesh(frostHeartGeo, frostHeartMat);
     group.add(frostHeart);
+    
+    // Add crystalline glow layers around frost heart
+    for (let i = 0; i < 2; i++) {
+        const glowSize = 1.3 + i * 0.3;
+        const glowGeo = new THREE.IcosahedronGeometry(glowSize, 1);
+        const glowMat = new THREE.MeshBasicMaterial({
+            color: 0x88ccff,
+            transparent: true,
+            opacity: 0.1 / (i + 1),
+            blending: THREE.AdditiveBlending,
+            side: THREE.BackSide
+        });
+        const glow = new THREE.Mesh(glowGeo, glowMat);
+        frostHeart.add(glow);
+    }
 
     group.userData = {
         type: 'iceNeedleCluster',
@@ -840,23 +1104,34 @@ export function updateIceNeedleCluster(cluster: THREE.Group, delta: number, time
     const data = cluster.userData;
     const timeValue = time + data.timeOffset;
 
-    // Shimmer effect on needles
-    data.needles.forEach((needle: THREE.Mesh, i: number) => {
-        const shimmer = Math.sin(timeValue * 2 + i * 0.5 + data.shimmerPhase) * 0.5 + 0.5;
-        const mat = needle.material as THREE.MeshPhysicalMaterial;
-        mat.opacity = 0.7 + shimmer * 0.2;
+    // Enhanced shimmer effect on needles with refraction-like pulses
+    data.needles.forEach((needle: any, i: number) => {
+        const shimmer = Math.sin(timeValue * 2.5 + i * 0.5 + data.shimmerPhase) * 0.5 + 0.5;
         
-        // Subtle sway
-        const sway = Math.sin(timeValue + i * 0.3) * 0.02;
-        needle.rotation.x = sway;
+        // Update each segment material if it's a group
+        if (needle.children && needle.children.length > 0) {
+            needle.children.forEach((segment: THREE.Mesh, s: number) => {
+                const mat = segment.material as THREE.MeshPhysicalMaterial;
+                mat.opacity = 0.8 + shimmer * 0.15;
+                mat.transmission = 0.5 + shimmer * 0.2;
+            });
+        }
+        
+        // Subtle sway with varying amplitude
+        const sway = Math.sin(timeValue * 1.2 + i * 0.3) * 0.03;
+        const twist = Math.cos(timeValue * 0.8 + i * 0.2) * 0.02;
+        needle.rotation.x = needle.userData.baseRotation.x + sway;
+        needle.rotation.z = needle.userData.baseRotation.z + twist;
     });
 
-    // Frost heart pulsing
+    // Enhanced frost heart pulsing with inner glow layers
     if (data.frostHeart) {
-        const pulse = Math.sin(timeValue * 1.5) * 0.5 + 0.5;
+        const pulse = Math.sin(timeValue * 2) * 0.5 + 0.5;
         const mat = data.frostHeart.material as THREE.MeshStandardMaterial;
-        mat.emissiveIntensity = 1.0 + pulse * 0.5;
-        data.frostHeart.scale.setScalar(1.0 + pulse * 0.1);
+        mat.emissiveIntensity = 1.5 + pulse * 1.0;
+        data.frostHeart.scale.setScalar(1.0 + pulse * 0.15);
+        data.frostHeart.rotation.y += delta * 0.5;
+        data.frostHeart.rotation.x += delta * 0.3;
     }
 }
 
@@ -944,40 +1219,103 @@ export function createMagmaHeart(options: any = {}) {
     const { size = 4, color = 0xff4400 } = options;
     const group = new THREE.Group();
 
-    // Crust shell
-    const crustGeo = new THREE.IcosahedronGeometry(size, 1);
+    // Enhanced crust shell with more detail
+    const crustGeo = new THREE.IcosahedronGeometry(size, 2);
+    
+    // Add surface irregularities
+    const positions = crustGeo.attributes.position;
+    for (let i = 0; i < positions.count; i++) {
+        if (Math.random() > 0.6) { // 40% of vertices get bumps
+            const x = positions.getX(i);
+            const y = positions.getY(i);
+            const z = positions.getZ(i);
+            const bump = 1.0 + Math.random() * 0.15;
+            positions.setXYZ(i, x * bump, y * bump, z * bump);
+        }
+    }
+    crustGeo.computeVertexNormals();
+    
     const crustMat = new THREE.MeshStandardMaterial({
-        color: 0x331100,
+        color: 0x2a1100,
         roughness: 1.0,
         metalness: 0.0,
         emissive: 0x331100,
-        emissiveIntensity: 0.2
+        emissiveIntensity: 0.3
     });
     
     const crust = new THREE.Mesh(crustGeo, crustMat);
     crust.castShadow = true;
+    crust.receiveShadow = true;
     group.add(crust);
 
-    // Inner magma glow (visible through cracks)
-    const glowGeo = new THREE.IcosahedronGeometry(size * 0.9, 2);
-    const glowMat = new THREE.MeshStandardMaterial({
-        color: color,
-        emissive: color,
-        emissiveIntensity: 2.0,
-        transparent: true,
-        opacity: 0.0 // Starts hidden
-    });
+    // Inner magma glow (visible through cracks) - multiple layers
+    const glowLayers: THREE.Mesh[] = [];
+    for (let i = 0; i < 2; i++) {
+        const glowSize = size * (0.88 - i * 0.05);
+        const glowGeo = new THREE.IcosahedronGeometry(glowSize, 2);
+        const glowMat = new THREE.MeshStandardMaterial({
+            color: i === 0 ? color : 0xff6600,
+            emissive: i === 0 ? color : 0xff6600,
+            emissiveIntensity: 2.5 - i * 0.5,
+            transparent: true,
+            opacity: 0.0 // Starts hidden
+        });
+        
+        const glow = new THREE.Mesh(glowGeo, glowMat);
+        glowLayers.push(glow);
+        group.add(glow);
+    }
     
-    const glow = new THREE.Mesh(glowGeo, glowMat);
-    group.add(glow);
+    // Crack lines that will appear during critical phase
+    const crackLines: THREE.Line[] = [];
+    for (let i = 0; i < 6; i++) {
+        const points: THREE.Vector3[] = [];
+        const theta = (i / 6) * Math.PI * 2;
+        const segments = 8;
+        
+        for (let j = 0; j <= segments; j++) {
+            const t = j / segments;
+            const phi = (t - 0.5) * Math.PI * 0.8;
+            const r = size * (1.01 + Math.sin(t * Math.PI * 2) * 0.02);
+            points.push(new THREE.Vector3(
+                r * Math.cos(theta) * Math.cos(phi),
+                r * Math.sin(theta) * Math.cos(phi),
+                r * Math.sin(phi)
+            ));
+        }
+        
+        const crackGeo = new THREE.BufferGeometry().setFromPoints(points);
+        const crackMat = new THREE.LineBasicMaterial({
+            color: 0xff4400,
+            transparent: true,
+            opacity: 0.0
+        });
+        const crack = new THREE.Line(crackGeo, crackMat);
+        crackLines.push(crack);
+        group.add(crack);
+    }
 
     // Lava droplets (spawn during critical phase)
     const droplets: THREE.Mesh[] = [];
+    
+    // Add heat distortion aura
+    const auraGeo = new THREE.SphereGeometry(size * 1.4, 16, 16);
+    const auraMat = new THREE.MeshBasicMaterial({
+        color: 0xff4400,
+        transparent: true,
+        opacity: 0.0,
+        blending: THREE.AdditiveBlending,
+        side: THREE.BackSide
+    });
+    const aura = new THREE.Mesh(auraGeo, auraMat);
+    group.add(aura);
 
     group.userData = {
         type: 'magmaHeart',
         crust: crust,
-        glow: glow,
+        glowLayers: glowLayers,
+        crackLines: crackLines,
+        aura: aura,
         droplets: droplets,
         size: size,
         pressure: 0, // 0-100%
@@ -1000,16 +1338,25 @@ export function updateMagmaHeart(heart: THREE.Group, delta: number, time: number
     data.phaseTimer += delta;
 
     const crustMat = data.crust.material as THREE.MeshStandardMaterial;
-    const glowMat = data.glow.material as THREE.MeshStandardMaterial;
 
     // Build Phase (0-80% pressure)
     if (data.phase === 'build') {
         data.pressure = Math.min(80, data.pressure + delta * 5); // 16 seconds to reach 80%
         
         // Pulse intensity increases with pressure
-        const pulse = Math.sin(timeValue * (1 + data.pressure / 100)) * 0.5 + 0.5;
-        crustMat.emissiveIntensity = 0.2 + (data.pressure / 100) * 0.8 * pulse;
-        glowMat.opacity = (data.pressure / 100) * 0.3;
+        const pulse = Math.sin(timeValue * (1.5 + data.pressure / 100)) * 0.5 + 0.5;
+        crustMat.emissiveIntensity = 0.3 + (data.pressure / 100) * 1.0 * pulse;
+        
+        // Show inner glow layers gradually
+        data.glowLayers.forEach((glow: THREE.Mesh, i: number) => {
+            const mat = glow.material as THREE.MeshStandardMaterial;
+            mat.opacity = (data.pressure / 100) * (0.4 - i * 0.1);
+            glow.rotation.y += delta * (0.5 + i * 0.3);
+        });
+        
+        // Update aura
+        const auraMat = data.aura.material as THREE.MeshBasicMaterial;
+        auraMat.opacity = (data.pressure / 100) * 0.05;
         
         if (data.pressure >= 80) {
             data.phase = 'critical';
@@ -1022,17 +1369,37 @@ export function updateMagmaHeart(heart: THREE.Group, delta: number, time: number
         data.pressure = Math.min(100, 80 + (data.phaseTimer / 5) * 20);
         
         // Intense pulsing
-        const urgentPulse = Math.sin(timeValue * 8) * 0.5 + 0.5;
-        crustMat.emissiveIntensity = 1.5 + urgentPulse * 0.5;
-        glowMat.opacity = 0.5 + urgentPulse * 0.3;
+        const urgentPulse = Math.sin(timeValue * 10) * 0.5 + 0.5;
+        crustMat.emissiveIntensity = 2.0 + urgentPulse * 1.0;
+        crustMat.emissive.setHex(0x551100 + Math.floor(urgentPulse * 0x222200));
+        
+        // Glow layers become more visible
+        data.glowLayers.forEach((glow: THREE.Mesh, i: number) => {
+            const mat = glow.material as THREE.MeshStandardMaterial;
+            mat.opacity = 0.6 + urgentPulse * 0.3 - i * 0.15;
+            mat.emissiveIntensity = 3.0 + urgentPulse * 1.0;
+            glow.rotation.y += delta * (1.0 + i * 0.5);
+        });
+        
+        // Show crack lines
+        data.crackLines.forEach((crack: THREE.Line, i: number) => {
+            const mat = crack.material as THREE.LineBasicMaterial;
+            const crackPulse = Math.sin(timeValue * 8 + i) * 0.5 + 0.5;
+            mat.opacity = 0.4 + crackPulse * 0.4;
+        });
+        
+        // Enhanced aura
+        const auraMat = data.aura.material as THREE.MeshBasicMaterial;
+        auraMat.opacity = 0.1 + urgentPulse * 0.1;
+        data.aura.scale.setScalar(1.0 + urgentPulse * 0.1);
         
         // Spawn lava droplets
-        if (Math.random() < 0.1) {
-            const dropletGeo = new THREE.SphereGeometry(0.2, 8, 8);
+        if (Math.random() < 0.15) {
+            const dropletGeo = new THREE.SphereGeometry(0.15 + Math.random() * 0.15, 8, 8);
             const dropletMat = new THREE.MeshStandardMaterial({
                 color: 0xff6600,
                 emissive: 0xff6600,
-                emissiveIntensity: 2.0
+                emissiveIntensity: 3.0
             });
             const droplet = new THREE.Mesh(dropletGeo, dropletMat);
             
@@ -1040,9 +1407,9 @@ export function updateMagmaHeart(heart: THREE.Group, delta: number, time: number
             const theta = Math.random() * Math.PI * 2;
             const phi = Math.random() * Math.PI;
             droplet.position.set(
-                data.size * Math.sin(phi) * Math.cos(theta),
-                data.size * Math.sin(phi) * Math.sin(theta),
-                data.size * Math.cos(phi)
+                data.size * 1.05 * Math.sin(phi) * Math.cos(theta),
+                data.size * 1.05 * Math.sin(phi) * Math.sin(theta),
+                data.size * 1.05 * Math.cos(phi)
             );
             
             data.droplets.push(droplet);
@@ -1057,8 +1424,25 @@ export function updateMagmaHeart(heart: THREE.Group, delta: number, time: number
     
     // Eruption Phase
     else if (data.phase === 'eruption') {
-        crustMat.emissiveIntensity = 3.0;
-        glowMat.opacity = 1.0;
+        const eruptPulse = Math.sin(timeValue * 15) * 0.5 + 0.5;
+        crustMat.emissiveIntensity = 4.0 + eruptPulse;
+        
+        // Maximum glow
+        data.glowLayers.forEach((glow: THREE.Mesh, i: number) => {
+            const mat = glow.material as THREE.MeshStandardMaterial;
+            mat.opacity = 1.0 - i * 0.2;
+            mat.emissiveIntensity = 5.0;
+        });
+        
+        // Maximum crack visibility
+        data.crackLines.forEach((crack: THREE.Line) => {
+            const mat = crack.material as THREE.LineBasicMaterial;
+            mat.opacity = 1.0;
+        });
+        
+        // Maximum aura
+        const auraMat = data.aura.material as THREE.MeshBasicMaterial;
+        auraMat.opacity = 0.25;
         
         // Would spawn lava globs radially here
         // This is where the actual eruption effect would trigger
@@ -1077,8 +1461,23 @@ export function updateMagmaHeart(heart: THREE.Group, delta: number, time: number
     // Cooldown Phase (15 seconds)
     else if (data.phase === 'cooldown') {
         const coolProgress = data.phaseTimer / 15;
-        crustMat.emissiveIntensity = 3.0 * (1 - coolProgress);
-        glowMat.opacity = 1.0 * (1 - coolProgress);
+        crustMat.emissiveIntensity = 4.0 * (1 - coolProgress) + 0.3;
+        
+        // Fade out glow layers
+        data.glowLayers.forEach((glow: THREE.Mesh, i: number) => {
+            const mat = glow.material as THREE.MeshStandardMaterial;
+            mat.opacity = (1.0 - i * 0.2) * (1 - coolProgress);
+        });
+        
+        // Fade crack lines
+        data.crackLines.forEach((crack: THREE.Line) => {
+            const mat = crack.material as THREE.LineBasicMaterial;
+            mat.opacity = 1.0 * (1 - coolProgress);
+        });
+        
+        // Fade aura
+        const auraMat = data.aura.material as THREE.MeshBasicMaterial;
+        auraMat.opacity = 0.25 * (1 - coolProgress);
         
         if (data.phaseTimer >= 15) {
             data.phase = 'build';
@@ -1086,6 +1485,7 @@ export function updateMagmaHeart(heart: THREE.Group, delta: number, time: number
         }
     }
 
-    // Slow rotation
-    heart.rotation.y += delta * 0.2;
+    // Multi-axis rotation for more dynamic movement
+    heart.rotation.y += delta * 0.25;
+    heart.rotation.x += delta * 0.12;
 }
