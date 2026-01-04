@@ -38,6 +38,7 @@ import {
     createMagmaHeart,
     updateMagmaHeart
 } from './geological';
+import { ReEntrySystem } from './reentry';
 
 // --- Configuration ---
 const CONFIG = {
@@ -920,6 +921,14 @@ class LevelManager {
         // Configure clouds based on level type/name
         // For now, always visible but could be customized
         this.cloudSystem.layers.forEach(l => l.mesh.visible = true);
+
+        // Special Effects per Level
+        if (levelIndex === 4) {
+            // Activate Re-Entry Heat in the Industrial Tunnel
+            reEntrySystem.activate();
+        } else {
+            reEntrySystem.deactivate();
+        }
     }
 
     update(delta: number, cameraX: number, speed: number) {
@@ -1381,6 +1390,9 @@ scene.add(galaxy3);
 // PARTICLE SYSTEM (engine trails & explosions)
 const particleSystem = new ParticleSystem(scene);
 
+// RE-ENTRY SYSTEM (Atmospheric Heat Effects)
+const reEntrySystem = new ReEntrySystem(scene, camera);
+
 // =============================================================================
 // GEOLOGICAL OBJECTS & ANOMALIES (from plan.md)
 // =============================================================================
@@ -1732,6 +1744,15 @@ function onKeyDown(event: KeyboardEvent) {
         case 'ShiftRight':
             keys.run = true;
             break;
+        case 'KeyH': // Toggle Heat Effect manually
+            if (reEntrySystem.active) {
+                reEntrySystem.deactivate();
+                console.log("Heat Effect OFF");
+            } else {
+                reEntrySystem.activate();
+                console.log("Heat Effect ON");
+            }
+            break;
     }
 }
 
@@ -1986,6 +2007,11 @@ function animate() {
 
     // --- NEW: Update Particles (engine trails & explosions)
     particleSystem.update(delta);
+
+    // Update Re-Entry System
+    if (player) {
+        reEntrySystem.update(delta, camera.position.x, camera.position.y);
+    }
 
     // Update Level Manager (and Clouds)
     if (player) {
