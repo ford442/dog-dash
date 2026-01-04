@@ -18,6 +18,7 @@ import {
     updateSolarSail
 } from './foliage';
 import { ParticleSystem } from './particles';
+import { CloudSystem } from './clouds';
 import {
     SporeCloud,
     createChromaShiftRock,
@@ -725,8 +726,10 @@ class LevelManager {
     currentLevel: number;
     config: { [key: number]: LevelConfig };
     levelObjects: THREE.Object3D[];
+    cloudSystem: CloudSystem;
 
     constructor() {
+        this.cloudSystem = new CloudSystem(scene);
         this.currentLevel = 1;
         this.config = {
             1: {
@@ -913,6 +916,14 @@ class LevelManager {
 
         // Populate new zone ahead of player
         this.populateZone(player.position.x + 50, player.position.x + 600, cfg);
+
+        // Configure clouds based on level type/name
+        // For now, always visible but could be customized
+        this.cloudSystem.layers.forEach(l => l.mesh.visible = true);
+    }
+
+    update(delta: number, cameraX: number, speed: number) {
+        this.cloudSystem.update(delta, cameraX, speed);
     }
 
     populateZone(startX: number, endX: number, config: LevelConfig) {
@@ -1304,37 +1315,6 @@ function handleCollision(hitIndex: number) {
 // =============================================================================
 // LEVEL GEOMETRY & BACKGROUND
 // =============================================================================
-
-// Background elements (parallax layers for depth)
-function createBackgroundLayer(zOffset: number, color: number, count: number) {
-    const group = new THREE.Group();
-    const mat = new THREE.MeshStandardMaterial({
-        color: color,
-        roughness: 1.0,
-        metalness: 0
-    });
-
-    for (let i = 0; i < count; i++) {
-        const width = 2 + Math.random() * 6;
-        const height = 3 + Math.random() * 10;
-        const geo = new THREE.BoxGeometry(width, height, 1);
-        const box = new THREE.Mesh(geo, mat);
-        box.position.set(
-            (Math.random() - 0.5) * 100,
-            height / 2,
-            zOffset
-        );
-        group.add(box);
-    }
-
-    scene.add(group);
-    return group;
-}
-
-// Create parallax background layers
-const bgLayer1 = createBackgroundLayer(-8, 0x15152a, 20);  // Far
-const bgLayer2 = createBackgroundLayer(-5, 0x1a1a35, 15);  // Mid
-const bgLayer3 = createBackgroundLayer(-3, 0x202045, 10);  // Near
 
 // =============================================================================
 // SPACE ENVIRONMENT (Stars, Galaxies, Moon)
@@ -2006,6 +1986,12 @@ function animate() {
 
     // --- NEW: Update Particles (engine trails & explosions)
     particleSystem.update(delta);
+
+    // Update Level Manager (and Clouds)
+    if (player) {
+        levelManager.update(delta, camera.position.x, playerState.autoScrollSpeed);
+    }
+
     updateCamera();
     
     // --- NEW: Update Geological Objects ---
