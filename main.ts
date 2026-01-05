@@ -39,6 +39,7 @@ import {
     updateMagmaHeart
 } from './geological';
 import { ReEntrySystem } from './reentry';
+import { WaterfallSystem } from './waterfall';
 
 // --- Configuration ---
 const CONFIG = {
@@ -874,6 +875,32 @@ class LevelManager {
                 tunnelHeight: 20,
                 obstacleInterval: 25, // Spawn rib section every 25m
                 fogDensity: 0.08 // Dense Memory Fog
+            },
+            6: {
+                name: "The Aqua Expanse",
+                distance: 5200, // Final level
+                asteroidRate: 1.5,
+                foliageDensity: {
+                    fern: 20,
+                    rose: 0,
+                    lotus: 40, // Water plants
+                    glowingFlower: 10,
+                    tree: 5,
+                    floweringTree: 10,
+                    shrub: 20,
+                    vine: 30,
+                    orb: 20,
+                    mushroom: 10,
+                    cloud: 20,
+                    voidRootBall: 0,
+                    vacuumKelp: 10, // Kelp in water!
+                    iceNeedle: 5,
+                    liquidMetal: 5, // Mercury drops
+                    magmaHeart: 0
+                },
+                speed: 10,
+                bgColor: 0x001133, // Deep blue
+                levelType: 'open'
             }
         };
 
@@ -929,10 +956,17 @@ class LevelManager {
         } else {
             reEntrySystem.deactivate();
         }
+
+        if (levelIndex === 6) {
+            waterfallSystem.activate();
+        } else {
+            waterfallSystem.deactivate();
+        }
     }
 
     update(delta: number, cameraX: number, speed: number) {
         this.cloudSystem.update(delta, cameraX, speed);
+        waterfallSystem.update(cameraX);
     }
 
     populateZone(startX: number, endX: number, config: LevelConfig) {
@@ -1084,6 +1118,8 @@ class LevelManager {
             this.startLevel(4);
         } else if (this.currentLevel === 4 && playerX > 3200) {
             this.startLevel(5);
+        } else if (this.currentLevel === 5 && playerX > 4200) {
+            this.startLevel(6);
         }
     }
 }
@@ -1392,6 +1428,9 @@ const particleSystem = new ParticleSystem(scene);
 
 // RE-ENTRY SYSTEM (Atmospheric Heat Effects)
 const reEntrySystem = new ReEntrySystem(scene, camera);
+
+// WATERFALL SYSTEM (Vertical Water Effects)
+const waterfallSystem = new WaterfallSystem(scene);
 
 // =============================================================================
 // GEOLOGICAL OBJECTS & ANOMALIES (from plan.md)
