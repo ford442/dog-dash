@@ -40,6 +40,7 @@ import {
 } from './geological';
 import { ReEntrySystem } from './reentry';
 import { WaterfallSystem } from './waterfall';
+import { AsteroidFieldSystem } from './asteroid_field';
 
 // --- Configuration ---
 const CONFIG = {
@@ -962,11 +963,19 @@ class LevelManager {
         } else {
             waterfallSystem.deactivate();
         }
+
+        // Activate Asteroid Fields in Level 2 & 3
+        if (levelIndex === 2 || levelIndex === 3) {
+            asteroidFieldSystem.activate();
+        } else {
+            asteroidFieldSystem.deactivate();
+        }
     }
 
     update(delta: number, cameraX: number, speed: number) {
         this.cloudSystem.update(delta, cameraX, speed);
         waterfallSystem.update(cameraX);
+        if (asteroidFieldSystem) asteroidFieldSystem.update(delta, cameraX);
     }
 
     populateZone(startX: number, endX: number, config: LevelConfig) {
@@ -1431,6 +1440,9 @@ const reEntrySystem = new ReEntrySystem(scene, camera);
 
 // WATERFALL SYSTEM (Vertical Water Effects)
 const waterfallSystem = new WaterfallSystem(scene);
+
+// ASTEROID FIELD SYSTEM (Parallax Asteroids)
+const asteroidFieldSystem = new AsteroidFieldSystem(scene);
 
 // =============================================================================
 // GEOLOGICAL OBJECTS & ANOMALIES (from plan.md)
