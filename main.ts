@@ -41,6 +41,7 @@ import {
 import { ReEntrySystem } from './reentry';
 import { WaterfallSystem } from './waterfall';
 import { AsteroidFieldSystem } from './asteroid_field';
+import { PlanetaryHorizonSystem } from './planetary_horizon';
 
 // --- Configuration ---
 const CONFIG = {
@@ -976,6 +977,7 @@ class LevelManager {
         this.cloudSystem.update(delta, cameraX, speed);
         waterfallSystem.update(cameraX);
         if (asteroidFieldSystem) asteroidFieldSystem.update(delta, cameraX);
+        if (planetaryHorizonSystem) planetaryHorizonSystem.update(cameraX);
     }
 
     populateZone(startX: number, endX: number, config: LevelConfig) {
@@ -1443,6 +1445,9 @@ const waterfallSystem = new WaterfallSystem(scene);
 
 // ASTEROID FIELD SYSTEM (Parallax Asteroids)
 const asteroidFieldSystem = new AsteroidFieldSystem(scene);
+
+// PLANETARY HORIZON SYSTEM (Massive scrolling planet)
+const planetaryHorizonSystem = new PlanetaryHorizonSystem(scene);
 
 // =============================================================================
 // GEOLOGICAL OBJECTS & ANOMALIES (from plan.md)
