@@ -42,6 +42,7 @@ import { ReEntrySystem } from './reentry';
 import { WaterfallSystem } from './waterfall';
 import { AsteroidFieldSystem } from './asteroid_field';
 import { PlanetaryHorizonSystem } from './planetary_horizon';
+import { IndustrialBackgroundSystem } from './industrial_background';
 
 // --- Configuration ---
 const CONFIG = {
@@ -955,8 +956,13 @@ class LevelManager {
         if (levelIndex === 4) {
             // Activate Re-Entry Heat in the Industrial Tunnel
             reEntrySystem.activate();
+            industrialSystem.activate();
+
+            // Industrial background is heavy, maybe hide clouds?
+            this.cloudSystem.layers.forEach(l => l.mesh.visible = false);
         } else {
             reEntrySystem.deactivate();
+            industrialSystem.deactivate();
         }
 
         if (levelIndex === 6) {
@@ -976,6 +982,7 @@ class LevelManager {
     update(delta: number, cameraX: number, speed: number) {
         this.cloudSystem.update(delta, cameraX, speed);
         waterfallSystem.update(cameraX);
+        industrialSystem.update(cameraX);
         if (asteroidFieldSystem) asteroidFieldSystem.update(delta, cameraX);
         if (planetaryHorizonSystem) planetaryHorizonSystem.update(cameraX);
     }
@@ -1448,6 +1455,9 @@ const asteroidFieldSystem = new AsteroidFieldSystem(scene);
 
 // PLANETARY HORIZON SYSTEM (Massive scrolling planet)
 const planetaryHorizonSystem = new PlanetaryHorizonSystem(scene);
+
+// INDUSTRIAL BACKGROUND SYSTEM (Megastructures)
+const industrialSystem = new IndustrialBackgroundSystem(scene);
 
 // =============================================================================
 // GEOLOGICAL OBJECTS & ANOMALIES (from plan.md)
