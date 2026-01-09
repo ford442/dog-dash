@@ -43,6 +43,7 @@ import { WaterfallSystem } from './waterfall';
 import { AsteroidFieldSystem } from './asteroid_field';
 import { PlanetaryHorizonSystem } from './planetary_horizon';
 import { IndustrialBackgroundSystem } from './industrial_background';
+import { NebulaSystem } from './nebula';
 
 // --- Configuration ---
 const CONFIG = {
@@ -877,7 +878,7 @@ class LevelManager {
                 levelType: 'organic_tunnel',
                 tunnelHeight: 20,
                 obstacleInterval: 25, // Spawn rib section every 25m
-                fogDensity: 0.08 // Dense Memory Fog
+                fogDensity: 0.02 // Light mist, rely on NebulaSystem for atmosphere
             },
             6: {
                 name: "The Aqua Expanse",
@@ -977,12 +978,25 @@ class LevelManager {
         } else {
             asteroidFieldSystem.deactivate();
         }
+
+        if (levelIndex === 5) {
+            nebulaSystem.activate();
+            // Hide clouds in nebula level
+            this.cloudSystem.layers.forEach(l => l.mesh.visible = false);
+        } else {
+            nebulaSystem.deactivate();
+            // Restore clouds if not in Industrial Tunnel (Level 4)
+            if (levelIndex !== 4) {
+                this.cloudSystem.layers.forEach(l => l.mesh.visible = true);
+            }
+        }
     }
 
     update(delta: number, cameraX: number, speed: number) {
         this.cloudSystem.update(delta, cameraX, speed);
         waterfallSystem.update(cameraX);
         industrialSystem.update(cameraX);
+        nebulaSystem.update(delta, cameraX);
         if (asteroidFieldSystem) asteroidFieldSystem.update(delta, cameraX);
         if (planetaryHorizonSystem) planetaryHorizonSystem.update(cameraX);
     }
@@ -1458,6 +1472,9 @@ const planetaryHorizonSystem = new PlanetaryHorizonSystem(scene);
 
 // INDUSTRIAL BACKGROUND SYSTEM (Megastructures)
 const industrialSystem = new IndustrialBackgroundSystem(scene);
+
+// NEBULA SYSTEM (Volumetric Clouds & Particles)
+const nebulaSystem = new NebulaSystem(scene);
 
 // =============================================================================
 // GEOLOGICAL OBJECTS & ANOMALIES (from plan.md)
