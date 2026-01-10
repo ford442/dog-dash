@@ -70,8 +70,7 @@ function createWaterMaterial(baseColorHex: number, opacity: number, speed: numbe
     // Sample simulated noise
     const noise1 = sin(flowUv.y.mul(20.0).add(flowUv.x.mul(10.0)));
     
-    // FIX: Changed .minus() to .sub()
-    // The previous error was here: TSL nodes use .sub() for subtraction
+    // CORRECTION HERE: Changed .minus() to .sub()
     const noise2 = cos(flowUv.y.mul(15.0).sub(flowUv.x.mul(5.0))); 
     
     const combinedNoise = noise1.add(noise2).mul(0.5); // Range -1 to 1
