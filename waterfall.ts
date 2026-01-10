@@ -68,9 +68,12 @@ function createWaterMaterial(baseColorHex: number, opacity: number, speed: numbe
     const flowUv = vec2(vUv.x.add(scrollX), vUv.y.add(scrollY));
 
     // Sample simulated noise
-    // FIX: Changed .minus() to .sub()
     const noise1 = sin(flowUv.y.mul(20.0).add(flowUv.x.mul(10.0)));
+    
+    // FIX: Changed .minus() to .sub()
+    // The previous error was here: TSL nodes use .sub() for subtraction
     const noise2 = cos(flowUv.y.mul(15.0).sub(flowUv.x.mul(5.0))); 
+    
     const combinedNoise = noise1.add(noise2).mul(0.5); // Range -1 to 1
 
     // Mix Base Color with lighter "Foam"
