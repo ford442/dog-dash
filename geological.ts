@@ -6,6 +6,7 @@ import {
 import {
     time,
     positionLocal,
+    normalLocal,
     uv,
     vec2,
     vec3,
@@ -120,12 +121,13 @@ export function updateGeode(group: THREE.Group, delta: number, timeVal: number) 
 }
 
 
-// 3. NEBULA JELLY-MOSS (Floating gelatinous organisms)
+// 3. NEBULA JELLY-MOSS (Advanced Behavior)
 export function createNebulaJellyMoss(config: { size: number }) {
-    const geo = new THREE.SphereGeometry(config.size, 32, 32);
+    // High-res geometry for vertex shader displacement (Optimized from 128)
+    const geo = new THREE.SphereGeometry(config.size, 48, 48);
     
-    // Jelly Material (Transmission/Glassy)
-    const mat = new THREE.MeshPhysicalMaterial({
+    // TSL Material for Membrane with Vertex Wobble
+    const mat = new MeshPhysicalNodeMaterial({
         color: 0x00ff88,
         transmission: 0.9,
         opacity: 1.0,
@@ -136,38 +138,81 @@ export function createNebulaJellyMoss(config: { size: number }) {
         side: THREE.DoubleSide
     });
     
+    // Vertex Wobble Logic (TSL)
+    const uTime = time;
+    const pos = positionLocal;
+    const norm = normalLocal;
+
+    // Organic noise-like movement using combined sine waves
+    const freq = float(1.5);
+    const speed = float(2.0);
+    const amp = float(config.size * 0.15); // 15% surface wobble
+
+    const wobbleX = sin(pos.y.mul(freq).add(uTime.mul(speed)));
+    const wobbleY = sin(pos.z.mul(freq).add(uTime.mul(speed.mul(1.1))));
+    const wobbleZ = sin(pos.x.mul(freq).add(uTime.mul(speed.mul(0.9))));
+    const wobble = wobbleX.add(wobbleY).add(wobbleZ);
+
+    // Displace vertices along normal
+    const newPos = pos.add(norm.mul(wobble.mul(amp)));
+    mat.positionNode = newPos;
+
+    // Pulsing Emissive Rim
+    const pulse = sin(uTime.mul(3.0)).add(1.0).mul(0.5);
+    mat.emissiveNode = color(0x00ff88).mul(pulse.mul(0.5));
+
     const mesh = new THREE.Mesh(geo, mat);
     
-    // Internal "Moss" (Particles or noise texture)
-    // For simplicity, we add a smaller inner sphere with noise texture or wireframe
-    const innerGeo = new THREE.IcosahedronGeometry(config.size * 0.7, 2);
-    const innerMat = new THREE.MeshStandardMaterial({
-        color: 0x004422,
-        wireframe: true,
-        emissive: 0x00ff88,
-        emissiveIntensity: 0.5
+    // Internal "Fractal Moss" Cores (Weak points)
+    const coreGroup = new THREE.Group();
+    const coreCount = 5 + Math.floor(Math.random() * 5);
+    const coreGeo = new THREE.IcosahedronGeometry(config.size * 0.15, 0);
+    const coreMat = new MeshStandardNodeMaterial({
+        color: 0xff2266, // Pinkish red contrast
+        emissive: 0x550022,
+        roughness: 0.8
     });
-    const inner = new THREE.Mesh(innerGeo, innerMat);
-    mesh.add(inner);
+
+    // Core pulse animation
+    coreMat.emissiveNode = color(0xff2266).mul(sin(uTime.mul(5.0)).add(1.0).mul(0.5));
+
+    for(let i=0; i<coreCount; i++) {
+        const core = new THREE.Mesh(coreGeo, coreMat);
+        // Distribute randomly inside
+        const r = config.size * 0.6 * Math.cbrt(Math.random());
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+
+        core.position.set(
+            r * Math.sin(phi) * Math.cos(theta),
+            r * Math.sin(phi) * Math.sin(theta),
+            r * Math.cos(phi)
+        );
+        core.userData = { isWeakPoint: true };
+        coreGroup.add(core);
+    }
+    mesh.add(coreGroup);
 
     mesh.userData = {
+        type: 'nebulaJellyMoss',
         radius: config.size,
-        baseScale: 1.0,
-        pulseSpeed: 1.0 + Math.random()
+        health: 10,
+        maxHealth: 10,
+        isHiding: false
     };
 
     return mesh;
 }
 
 export function updateNebulaJellyMoss(mesh: THREE.Mesh, delta: number, timeVal: number) {
-    // Pulse scale (breathing)
-    const s = 1.0 + Math.sin(timeVal * mesh.userData.pulseSpeed) * 0.05;
-    mesh.scale.setScalar(s);
+    // Slow drift rotation of the entire organism
+    mesh.rotation.x += delta * 0.05;
+    mesh.rotation.z += delta * 0.03;
     
-    // Rotate inner moss
+    // Rotate internal core structure
     if (mesh.children[0]) {
-        mesh.children[0].rotation.y += delta * 0.2;
-        mesh.children[0].rotation.z += delta * 0.1;
+        mesh.children[0].rotation.y -= delta * 0.2;
+        mesh.children[0].rotation.x += delta * 0.1;
     }
 }
 
