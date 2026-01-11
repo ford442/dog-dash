@@ -2124,6 +2124,11 @@ function animate() {
 
             // Player inside membrane?
             if (dist < radius) {
+                // Apply Viscosity (slow down player movement)
+                // Use frame-rate independent exponential decay: velocity *= damping^dt
+                // damping 0.05 represents very high viscosity (95% loss per second)
+                playerState.velocity.multiplyScalar(Math.pow(0.05, delta));
+
                 // Apply Stealth Effect
                 if (!jellyMoss.userData.isHiding) {
                     jellyMoss.userData.isHiding = true;
