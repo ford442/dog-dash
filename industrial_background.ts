@@ -87,7 +87,7 @@ function createPulsingConduitMaterial(baseColorHex: number, glowColorHex: number
     const pulse = sin(uTime.mul(2.0)).add(1.0).mul(0.5); // Global pulse
 
     const glowColor = color(glowColorHex);
-    const baseColor = color(baseColorHex);
+    // const baseColor = color(baseColorHex);
 
     // Center glow (simulating core) -> assume uv.x 0..1 wraps around.
     // If we want the pipe to look like it has a glowing core visible through slots,
@@ -98,6 +98,21 @@ function createPulsingConduitMaterial(baseColorHex: number, glowColorHex: number
     mat.emissiveNode = glowColor.mul(flow).mul(pulse).mul(2.0); // Intense glow
 
     return mat;
+}
+
+/**
+ * Creates a material for foreground silhouette structures.
+ * Visuals:
+ * - Dark, almost black metal
+ * - High roughness (rusty/dusty)
+ * - Slight rim light via metalness? Or just dark.
+ */
+function createForegroundMaterial() {
+    return new THREE.MeshStandardMaterial({
+        color: 0x1a1a1a,
+        roughness: 0.9,
+        metalness: 0.2,
+    });
 }
 
 /**
@@ -125,7 +140,7 @@ export class IndustrialLayer {
             yRange: number,
             scaleMin: number,
             scaleMax: number,
-            randomRotation: boolean
+            rotationMode: 'random' | 'horizontal' | 'vertical'
         }
     ) {
         this.count = config.count;
@@ -156,17 +171,16 @@ export class IndustrialLayer {
             this.dummy.scale.setScalar(s);
 
             // Orientation
-            if (config.randomRotation) {
+            if (config.rotationMode === 'random') {
                 this.dummy.rotation.set(
                     Math.random() * Math.PI,
                     Math.random() * Math.PI,
                     Math.random() * Math.PI
                 );
+            } else if (config.rotationMode === 'vertical') {
+                this.dummy.rotation.set(0, 0, 0);
             } else {
-                // Default orientation: if it's a pipe (cylinder), it usually stands up (Y).
-                // If we want horizontal pipes, rotate Z 90 deg.
-                // This class is generic, so we assume geometry is oriented correctly or caller handles it?
-                // For now, assume cylinders are vertical, we rotate them 90 deg Z to lie flat horizontally.
+                // Default 'horizontal'
                 this.dummy.rotation.z = Math.PI / 2;
             }
 
@@ -206,6 +220,7 @@ export class IndustrialLayer {
                 this.dummy.matrix.decompose(p, q, s);
 
                 this.dummy.position.set(x, this.positions[idx+1], this.positions[idx+2]);
+                // No rotation update needed here as we want them static in orientation
                 this.dummy.scale.copy(s);
                 this.dummy.quaternion.copy(q);
 
@@ -244,7 +259,7 @@ export class IndustrialBackgroundSystem {
             yRange: 40,
             scaleMin: 1.0,
             scaleMax: 2.0,
-            randomRotation: false // Horizontal pipes
+            rotationMode: 'horizontal'
         }));
 
         // Layer 2: Mid-ground Conveyor Belts / Structs
@@ -260,21 +275,17 @@ export class IndustrialBackgroundSystem {
             yRange: 30,
             scaleMin: 1.0,
             scaleMax: 1.5,
-            randomRotation: false
+            rotationMode: 'horizontal'
         }));
 
-        // Layer 3: Vertical Support Ribs (Foreground-ish background)
-        // Position: Z = -10 (Just behind the main play area walls at -5)
+        // Layer 3: Vertical Support Ribs (Background wall details)
+        // Position: Z = -12
         const ribGeo = new THREE.BoxGeometry(2, 40, 2);
         const ribMat = new THREE.MeshStandardMaterial({
             color: 0x443322,
             roughness: 0.9,
             metalness: 0.5
         });
-
-        // Add a layer that DOES rotate randomly (debris/junk)
-        // Not implemented in this specific loop logic yet (IndustrialLayer enforces rotation logic)
-        // Let's stick to structured background.
 
         this.layers.push(new IndustrialLayer(this.scene, ribGeo, ribMat, {
             count: 15,
@@ -284,25 +295,44 @@ export class IndustrialBackgroundSystem {
             yRange: 10,
             scaleMin: 1.0,
             scaleMax: 1.0,
-            randomRotation: false // Vertical ribs
+            rotationMode: 'vertical'
         }));
 
-        // Fix rotation for Ribs (they need to be vertical, IndustrialLayer defaults to Z=90 rotation for pipes)
-        // We need to customize this. IndustrialLayer is a bit rigid.
-        // Let's just patch it: Ribs in Layer 3.
-        // Actually, IndustrialLayer constructor sets rotation.z = PI/2.
-        // We should fix IndustrialLayer to accept an orientation config or let it be random.
-        // Updated IndustrialLayer to take 'randomRotation'.
-        // For structured non-random, it forces Horizontal.
-        // I should have made it more flexible.
-        // Hack: I'll just re-orient the ribs in this init function by accessing the mesh directly?
-        // No, `update` will reset positions but not rotations?
-        // `update` decomposes matrix, so it preserves rotation unless I change it.
-        // Wait, constructor sets initial rotation.
-        // If I want vertical ribs, I need to prevent the default PI/2 rotation in constructor.
+        // Layer 4: Foreground Pillars (Occlusion)
+        // Position: Z = 8 (In front of player at Z=0)
+        // Large, dark, imposing vertical structures
+        const fgPillarGeo = new THREE.BoxGeometry(3, 50, 3);
+        const fgMat = createForegroundMaterial();
 
-        // Let's modify IndustrialLayer logic in next iteration if needed.
-        // For now, Ribs will be horizontal beams, which is also fine for an industrial tunnel ceiling/floor.
+        this.layers.push(new IndustrialLayer(this.scene, fgPillarGeo, fgMat, {
+            count: 5, // Sparse
+            z: 8,
+            zRange: 2,
+            width: 150,
+            yRange: 10, // Centered roughly
+            scaleMin: 1.0,
+            scaleMax: 1.2,
+            rotationMode: 'vertical'
+        }));
+
+        // Layer 5: Foreground Cables (Hanging)
+        // Position: Z = 6
+        const cableGeo = new THREE.CylinderGeometry(0.2, 0.2, 30, 8);
+        const cableMat = new THREE.MeshStandardMaterial({
+            color: 0x000000,
+            roughness: 0.8
+        });
+
+        this.layers.push(new IndustrialLayer(this.scene, cableGeo, cableMat, {
+            count: 8,
+            z: 6,
+            zRange: 1,
+            width: 120,
+            yRange: 5,
+            scaleMin: 0.8,
+            scaleMax: 1.2,
+            rotationMode: 'vertical'
+        }));
     }
 
     activate() {
