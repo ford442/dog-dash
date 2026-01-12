@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import {
     MeshStandardNodeMaterial,
-    MeshBasicNodeMaterial
+    MeshBasicNodeMaterial,
+    PointsNodeMaterial
 } from 'three/webgpu';
 import {
     time,
-    positionLocal,
     uv,
     vec2,
     vec3,
@@ -16,195 +16,340 @@ import {
     sin,
     cos,
     float,
+    smoothstep,
     dot,
     normalView,
-    viewportTopLeft,
-    positionView,
-    normalize,
+    positionLocal,
     cameraPosition
 } from 'three/tsl';
 
+// --- TSL Noise Helpers ---
+
+// Simple pseudo-random function
+// Returns float 0..1
+const random2D = (v: any) => {
+    return sin(dot(v, vec2(12.9898, 78.233))).mul(43758.5453).fract();
+};
+
+// Value Noise 2D
+// We can use a simplified version using sin waves for stability if explicit noise is hard
+const valueNoise = (v: any) => {
+    const i = v.floor();
+    const f = v.fract();
+
+    // Four corners
+    const a = random2D(i);
+    const b = random2D(i.add(vec2(1.0, 0.0)));
+    const c = random2D(i.add(vec2(0.0, 1.0)));
+    const d = random2D(i.add(vec2(1.0, 1.0)));
+
+    const u = f.mul(f).mul(float(3.0).sub(f.mul(2.0))); // smoothstep curve
+
+    return mix(a, b, u.x).add(
+        (c.sub(a).mul(u.y).mul(float(1.0).sub(u.x))).add(
+        (d.sub(b).mul(u.x).mul(u.y)))
+    );
+};
+
+// Fractal Brownian Motion (3 Octaves)
+const fbm = (v: any) => {
+    let total = float(0.0);
+    let amplitude = float(0.5);
+    let frequency = float(1.0);
+
+    // Octave 1
+    total = total.add(valueNoise(v.mul(frequency)).mul(amplitude));
+
+    // Octave 2
+    frequency = frequency.mul(2.0);
+    amplitude = amplitude.mul(0.5);
+    total = total.add(valueNoise(v.mul(frequency)).mul(amplitude));
+
+    // Octave 3
+    frequency = frequency.mul(2.0);
+    amplitude = amplitude.mul(0.5);
+    total = total.add(valueNoise(v.mul(frequency)).mul(amplitude));
+
+    return total;
+};
+
 /**
- * Creates a TSL material for the planet surface.
- * Features:
- * - Scrolling texture (simulated rotation)
- * - Atmosphere glow (Fresnel)
- * - Day/Night terminal (lighting) - actually handled by StandardMaterial + Light
+ * Creates a TSL material for the Planet Surface (High Detail).
  */
-function createPlanetMaterial(baseColorHex: number) {
+function createPlanetSurfaceMaterial(baseColorHex: number) {
     const mat = new MeshStandardNodeMaterial({
         color: baseColorHex,
-        roughness: 0.8,
-        metalness: 0.1,
+        roughness: 0.7,
+        metalness: 0.2,
     });
 
     const uTime = time;
-    const uScrollSpeed = uniform(0.02); // Rotation speed
+    const uScrollSpeed = uniform(0.015); // Slow rotation
 
-    // --- Planet Surface Pattern (Procedural Noise) ---
     const vUv = uv();
 
-    // Scroll the texture to simulate rotation
+    // Scroll texture horizontally to simulate planet rotation under the ship
     const scrollX = uTime.mul(uScrollSpeed);
-    const scrolledUv = vec2(vUv.x.add(scrollX), vUv.y);
+    const p = vec2(vUv.x.add(scrollX).mul(10.0), vUv.y.mul(10.0)); // Scale UVs
 
-    // Simple noise approximation
-    // sin(x*f) + sin(y*f)
-    const noise = sin(scrolledUv.x.mul(20.0)).add(sin(scrolledUv.y.mul(10.0)));
-    const detail = sin(scrolledUv.x.mul(50.0).add(scrolledUv.y.mul(50.0))).mul(0.5);
+    // Generate Height/Terrain Map
+    const height = fbm(p); // 0..1
 
-    const terrain = noise.add(detail).mul(0.5).add(0.5); // 0 to 1
+    // Terrain Classification
+    // Ocean < 0.45
+    // Land 0.45 - 0.7
+    // Mountain > 0.7
 
-    // Mix colors based on terrain
-    const oceanColor = color(0x001133);
-    const landColor = color(0x225522);
-    const mountainColor = color(0x554433);
+    const oceanColor = color(0x051040); // Deep Blue/Black
+    const coastColor = color(0x1a4080); // Lighter Blue
+    const landColor = color(0x2a2a35);  // Alien Grey/Rock
+    const mountainColor = color(0x555566); // Snowy/Rocky peaks
 
-    // Color Ramps
-    // < 0.4 = Ocean
-    // 0.4 - 0.7 = Land
-    // > 0.7 = Mountain
+    // Mix Colors
+    // 1. Ocean vs Land
+    const isLand = smoothstep(0.4, 0.45, height);
+    let finalColor = mix(oceanColor, landColor, isLand);
 
-    const isLand = terrain.greaterThan(0.4);
-    const isMountain = terrain.greaterThan(0.7);
+    // 2. Coastline highlight (rim of land)
+    const isCoast = smoothstep(0.4, 0.45, height).sub(smoothstep(0.45, 0.5, height));
+    finalColor = mix(finalColor, coastColor, isCoast.mul(0.5));
 
-    let surfaceColor = mix(oceanColor, landColor, isLand);
-    surfaceColor = mix(surfaceColor, mountainColor, isMountain);
+    // 3. Mountains
+    const isMountain = smoothstep(0.7, 0.8, height);
+    finalColor = mix(finalColor, mountainColor, isMountain);
 
-    // Apply to color node
-    mat.colorNode = vec4(surfaceColor, 1.0);
+    // Specular / Roughness Map
+    // Oceans are smooth (low roughness), Land is rough
+    const rough = mix(float(0.2), float(0.9), isLand);
+    mat.roughnessNode = rough;
+
+    // Output
+    mat.colorNode = vec4(finalColor, 1.0);
 
     return mat;
 }
 
 /**
- * Creates a TSL material for the Atmosphere Halo
+ * Creates a TSL material for the Cloud Layer.
+ */
+function createPlanetCloudMaterial() {
+    const mat = new MeshStandardNodeMaterial({
+        transparent: true,
+        opacity: 0.8,
+        roughness: 1.0,
+        metalness: 0.0,
+        side: THREE.FrontSide
+    });
+
+    const uTime = time;
+    const uCloudSpeed = uniform(0.025); // Slightly faster than surface
+
+    const vUv = uv();
+    const scrollX = uTime.mul(uCloudSpeed);
+    const p = vec2(vUv.x.add(scrollX).mul(8.0), vUv.y.mul(8.0));
+
+    // Cloud Noise
+    const n = fbm(p.add(vec2(23.4, 51.2))); // Offset seed
+
+    // Threshold for clouds (only show high density)
+    const density = smoothstep(0.5, 0.8, n);
+
+    const cloudColor = color(0xaaccff);
+
+    // Shadows? Simple approximation: darken bottom of clouds?
+    // For now just white/blue clouds
+    mat.colorNode = vec4(cloudColor, density.mul(0.8)); // Max opacity 0.8
+
+    return mat;
+}
+
+/**
+ * Creates a TSL material for the Atmosphere Halo.
  */
 function createAtmosphereMaterial(atmosphereColorHex: number) {
     const mat = new MeshBasicNodeMaterial({
         transparent: true,
-        side: THREE.BackSide, // Render on inside of a slightly larger sphere? Or FrontSide of outer shell?
-                              // Usually BackSide of a larger sphere looks good for internal glow,
-                              // but for external view, FrontSide of larger sphere with fresnel opacity.
+        side: THREE.FrontSide, // Outer shell
         depthWrite: false,
         blending: THREE.AdditiveBlending
     });
 
-    // Fresnel Effect for Atmosphere
-    // Opacity is high at edges, low at center
-    // Dot(View, Normal)
-    // View vector is needed.
-    // In TSL:
-    // const viewDir = normalize( cameraPosition.sub( positionWorld ) );
-    // const fresnel = dot( viewDir, normalWorld );
-    // Or simplified: normalView.z is often enough approximation in view space?
-
-    // Let's try simple edge detection using normalView (which is view space normal)
-    // normalView.z is 1 when facing camera, 0 when perpendicular (edge)
-    // We want glow at edge (0) -> high opacity
-    // glow at center (1) -> low opacity
-
-    // This requires the normal to be updated correctly.
-    // Since we are using BackSide, normals might be inverted?
-    // Let's use FrontSide on a slightly larger sphere.
-    mat.side = THREE.FrontSide;
-
-    const nView = normalView; // vec3
-    const rim = float(1.0).sub(nView.z.abs()); // 0 at center, 1 at edge
-    const glow = rim.pow(4.0); // Sharpen the rim
+    const nView = normalView;
+    // Edge glow (Fresnel)
+    // 0 at center, 1 at edge
+    const rim = float(1.0).sub(nView.z.abs());
+    const glow = rim.pow(3.0);
 
     const atmColor = color(atmosphereColorHex);
-    mat.colorNode = vec4(atmColor, glow);
+    mat.colorNode = vec4(atmColor, glow.mul(0.8));
 
     return mat;
 }
 
+/**
+ * Creates Deep Space Starfield points that will parallax.
+ */
+function createDeepSpaceStars(count: number = 1000) {
+    const geo = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3);
+    const sizes = new Float32Array(count);
+
+    const width = 1000;
+    const height = 500;
+    const depth = 200;
+
+    for(let i=0; i<count; i++) {
+        positions[i*3] = (Math.random() - 0.5) * width;
+        positions[i*3+1] = (Math.random() - 0.5) * height; // Above and below horizon
+        positions[i*3+2] = (Math.random() - 0.5) * depth - 100; // Far behind planet
+
+        sizes[i] = Math.random() * 2.0 + 0.5;
+    }
+
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+    const mat = new PointsNodeMaterial({
+        size: 1.0,
+        transparent: true,
+        opacity: 0.6,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+    });
+
+    // Simple white stars
+    mat.colorNode = vec4(1.0, 1.0, 1.0, 1.0);
+
+    const stars = new THREE.Points(geo, mat);
+    stars.frustumCulled = false; // Always render, we handle wrapping manually
+    return stars;
+}
+
 export class PlanetaryHorizonSystem {
     scene: THREE.Scene;
-    planet: THREE.Mesh;
-    atmosphere: THREE.Mesh;
     active: boolean = false;
 
-    // Config
-    radius: number = 400; // Huge
-    distanceY: number = -380; // Positioned so top surface is near Y=-20?
-                              // Player is at Y=0. Ground is -50 effectively.
-                              // If radius is 400, center at -420 puts top at -20.
+    // Components
+    container: THREE.Group;
+    planet: THREE.Mesh;
+    clouds: THREE.Mesh;
+    atmosphere: THREE.Mesh;
+    bgStars: THREE.Points;
+
+    // Parallax Config
+    // Planet moves with camera X (Horizon)
+    // BgStars move at 95% camera speed (creating "Deep Space" depth where they drift slowly)
+    starPositions: Float32Array;
 
     constructor(scene: THREE.Scene) {
         this.scene = scene;
+        this.container = new THREE.Group();
+        this.scene.add(this.container);
 
-        // 1. Planet Sphere
-        const planetGeo = new THREE.SphereGeometry(this.radius, 64, 64);
-        const planetMat = createPlanetMaterial(0x2255ff);
+        const radius = 400;
+
+        // 1. Planet Surface
+        const planetGeo = new THREE.SphereGeometry(radius, 128, 128); // Higher detail
+        const planetMat = createPlanetSurfaceMaterial(0x2255ff);
         this.planet = new THREE.Mesh(planetGeo, planetMat);
+        this.planet.position.set(0, -420, -100); // Center below, deep in background
+        this.container.add(this.planet);
 
-        // Positioned below
-        this.planet.position.set(0, -420, -50);
-        // Z=-50 puts it in background, parallax will handle movement if we don't attach to camera.
-        // Wait, "Horizon" usually means it moves WITH the camera but rotates.
-        // If it's static in world, the player will fly over it.
-        // Given the scale (radius 400), flying 100 units/sec (fast) would cross it in 8 seconds.
-        // We probably want it to follow the camera X but rotate.
+        // 2. Cloud Layer
+        const cloudGeo = new THREE.SphereGeometry(radius * 1.01, 128, 128); // Slightly larger
+        const cloudMat = createPlanetCloudMaterial();
+        this.clouds = new THREE.Mesh(cloudGeo, cloudMat);
+        this.clouds.position.copy(this.planet.position);
+        this.container.add(this.clouds);
 
-        this.planet.visible = false;
-        this.scene.add(this.planet);
-
-        // 2. Atmosphere Shell
-        const atmGeo = new THREE.SphereGeometry(this.radius * 1.05, 64, 64);
+        // 3. Atmosphere Halo
+        const atmGeo = new THREE.SphereGeometry(radius * 1.15, 64, 64);
         const atmMat = createAtmosphereMaterial(0x4488ff);
         this.atmosphere = new THREE.Mesh(atmGeo, atmMat);
         this.atmosphere.position.copy(this.planet.position);
-        this.atmosphere.visible = false;
-        this.scene.add(this.atmosphere);
+        this.container.add(this.atmosphere);
+
+        // 4. Deep Space Stars
+        this.bgStars = createDeepSpaceStars(2000);
+        this.bgStars.position.z = -200; // Far back
+        this.starPositions = (this.bgStars.geometry.attributes.position as THREE.BufferAttribute).array as Float32Array;
+        this.container.add(this.bgStars);
+
+        this.deactivate();
     }
 
     activate() {
         if (this.active) return;
         this.active = true;
-        this.planet.visible = true;
-        this.atmosphere.visible = true;
+        this.container.visible = true;
     }
 
     deactivate() {
         if (!this.active) return;
         this.active = false;
-        this.planet.visible = false;
-        this.atmosphere.visible = false;
+        this.container.visible = false;
     }
 
-    update(cameraX: number) {
+    update(cameraX: number, delta: number = 0.016) {
         if (!this.active) return;
 
-        // Follow camera X
-        // This makes it an "Infinite Horizon"
+        // 1. Planet Follows Camera Exactly (Horizon Effect)
+        // This makes the planet feel massive and stationary relative to the "horizon" line
         this.planet.position.x = cameraX;
+        this.clouds.position.x = cameraX;
         this.atmosphere.position.x = cameraX;
 
-        // Rotate planet to simulate movement over surface
-        // Player moves +X
-        // Planet should rotate -Z (around Y axis? No, around Z axis would be rolling)
-        // Rolling forward: Rotate -Z.
-        // Wait, if I fly East (Right, +X) over a planet, the surface below moves West (-X).
-        // On a sphere below me, that corresponds to rotation around the Z axis?
-        // No, Z axis comes out of screen. Rotation around Z rotates the texture in the 2D plane (clock/counterclock).
-        // We want rotation around Y axis? That would be turning left/right.
-        // We want rotation around Z axis, effectively "rolling" the sphere?
-        // Or texture scrolling?
-        // The shader already handles texture scrolling (uScrollSpeed).
-        // So we might just need to orient the sphere correctly.
+        // 2. Stars Parallax
+        // Stars should move SLOWER than camera to appear far away.
+        // If they move at 0.95 * cameraX, they drift backwards at 0.05 speed relative to camera.
+        // But we need to wrap them so we never run out of stars.
 
-        // Actually, TSL shader `uScrollSpeed` scrolls UVs.
-        // Standard Sphere UVs wrap around Y axis (longitude).
-        // So scrolling U moves texture horizontally.
-        // If we rotate the sphere 90 deg so pole faces camera?
-        // Let's stick to standard orientation.
-        // Scrolling UV.x moves texture around the equator.
-        // This looks like spinning.
+        const parallaxFactor = 0.95;
+        const starContainerX = cameraX * parallaxFactor;
 
-        // If we want to fly "forward" over the horizon, we might want UV.y scrolling?
-        // Or if we are flying "Right" across the screen, we want UV.x scrolling.
-        // Yes, side scroller. We fly Right. Surface moves Left.
-        // So scrolling UV.x is correct.
+        // We simulate the container moving, but since we want infinite wrapping,
+        // we might keep container at 0 and update star positions?
+        // Or keep container at starContainerX and wrap local positions?
+
+        this.bgStars.position.x = starContainerX;
+
+        // Wrapping Logic
+        // The view window in "Star Space" is [cameraX - width/2, cameraX + width/2]
+        // But since we moved the container to `starContainerX`, the local view window is shifted.
+        // Relative Camera X inside the container:
+        const relCamX = cameraX - starContainerX; // = cameraX * (1 - 0.95) = 0.05 * cameraX
+
+        // We wrap stars around this relative position
+        const width = 1000; // Match generation width
+        const halfWidth = width / 2;
+
+        const count = this.starPositions.length / 3;
+        let needsUpdate = false;
+
+        for(let i=0; i<count; i++) {
+            let x = this.starPositions[i*3];
+
+            // If star falls too far behind relative view center
+            if (x < relCamX - halfWidth) {
+                x += width;
+                this.starPositions[i*3] = x;
+                needsUpdate = true;
+            }
+            // If star is too far ahead (e.g. going left)
+            else if (x > relCamX + halfWidth) {
+                x -= width;
+                this.starPositions[i*3] = x;
+                needsUpdate = true;
+            }
+        }
+
+        if (needsUpdate) {
+            this.bgStars.geometry.attributes.position.needsUpdate = true;
+        }
+
+        // 3. Rotation (Simulated by Shader mostly, but we can add slow mesh rotation too)
+        // Rotating the mesh slightly adds 3D curvature feel at the poles
+        this.planet.rotation.z += 0.005 * delta;
+        this.clouds.rotation.z += 0.008 * delta; // Differential rotation
     }
 }
