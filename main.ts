@@ -998,7 +998,7 @@ class LevelManager {
         industrialSystem.update(cameraX);
         nebulaSystem.update(delta, cameraX);
         if (asteroidFieldSystem) asteroidFieldSystem.update(delta, cameraX);
-        if (planetaryHorizonSystem) planetaryHorizonSystem.update(cameraX);
+        if (planetaryHorizonSystem) planetaryHorizonSystem.update(cameraX, delta);
     }
 
     populateZone(startX: number, endX: number, config: LevelConfig) {

@@ -33,7 +33,7 @@ function walk(dir) {
   const out = [];
   const files = fs.readdirSync(dir);
   for (const f of files) {
-    if (f === 'node_modules' || f === '.git') continue;
+    if (f === 'node_modules' || f === '.git' || f === 'dist' || f === 'build') continue;
     const full = path.join(dir,f);
     const stat = fs.statSync(full);
     if (stat.isDirectory()) out.push(...walk(full));
