@@ -71,67 +71,116 @@ const CONFIG = {
     groundLevel: -50 // effectively no ground collision near 0
 };
 
+// --- Error Handling ---
+function showError(title: string, message: string) {
+    const errorDiv = document.createElement('div');
+    errorDiv.style.position = 'absolute';
+    errorDiv.style.top = '0';
+    errorDiv.style.left = '0';
+    errorDiv.style.width = '100%';
+    errorDiv.style.height = '100%';
+    errorDiv.style.backgroundColor = 'rgba(50, 0, 0, 0.9)';
+    errorDiv.style.color = 'white';
+    errorDiv.style.display = 'flex';
+    errorDiv.style.flexDirection = 'column';
+    errorDiv.style.justifyContent = 'center';
+    errorDiv.style.alignItems = 'center';
+    errorDiv.style.zIndex = '10000'; // Very high z-index to be on top of instructions
+    errorDiv.style.padding = '20px';
+    errorDiv.style.textAlign = 'center';
+
+    const h1 = document.createElement('h1');
+    h1.textContent = title;
+    h1.style.color = '#ff4444';
+    h1.style.marginBottom = '20px';
+    errorDiv.appendChild(h1);
+
+    const p = document.createElement('p');
+    p.textContent = message;
+    p.style.fontSize = '18px';
+    p.style.maxWidth = '600px';
+    errorDiv.appendChild(p);
+
+    document.body.appendChild(errorDiv);
+    console.error(`ERROR: ${title} - ${message}`);
+}
+
 // --- Scene Setup ---
 const canvas = document.querySelector('#glCanvas') as HTMLCanvasElement;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(CONFIG.colors.background);
 scene.fog = new THREE.Fog(CONFIG.colors.background, 20, 80);
 
-// Check WebGPU
-if (!WebGPU.isAvailable()) {
-    const warning = WebGPU.getErrorMessage();
-    document.body.appendChild(warning);
-    throw new Error('WebGPU not supported');
-}
-
-// --- Camera (Side-view, follows player on X axis) ---
+let renderer: WebGPURenderer;
 const aspect = window.innerWidth / window.innerHeight;
 const camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 200);
-// Camera positioned to the side, looking at Z=0 plane
-camera.position.set(0, CONFIG.cameraHeight, CONFIG.cameraDistance);
-camera.lookAt(0, CONFIG.cameraHeight, 0);
-
-// --- Renderer ---
-const renderer = new WebGPURenderer({ canvas, antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.3; // Slightly higher for more vibrant colors
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
-// --- Lighting (Moody, atmospheric) ---
-const ambientLight = new THREE.AmbientLight(0x404060, 0.5);
-scene.add(ambientLight);
-
-// Main directional light (from the side for dramatic shadows)
 const mainLight = new THREE.DirectionalLight(0xffffff, 0.8);
-mainLight.position.set(-5, 10, 10);
-mainLight.castShadow = true;
-mainLight.shadow.mapSize.width = 2048;
-mainLight.shadow.mapSize.height = 2048;
-mainLight.shadow.camera.near = 0.5;
-mainLight.shadow.camera.far = 50;
-mainLight.shadow.camera.left = -30;
-mainLight.shadow.camera.right = 30;
-mainLight.shadow.camera.top = 20;
-mainLight.shadow.camera.bottom = -10;
-mainLight.shadow.bias = -0.0001;
-scene.add(mainLight);
-
-// Rim light from behind (cinematic depth) - enhanced
 const rimLight = new THREE.DirectionalLight(0x6699ff, 0.4);
-rimLight.position.set(5, 5, -10);
-scene.add(rimLight);
-
-// Add accent lights for more depth
 const accentLight1 = new THREE.PointLight(0xff8844, 0.6, 30);
-accentLight1.position.set(0, 5, 5);
-scene.add(accentLight1);
-
 const accentLight2 = new THREE.PointLight(0x44ff88, 0.5, 25);
-accentLight2.position.set(0, 3, -5);
-scene.add(accentLight2);
+const ambientLight = new THREE.AmbientLight(0x404060, 0.5);
+
+// Check WebGPU & Initialize
+try {
+    if (!WebGPU.isAvailable()) {
+        const warning = WebGPU.getErrorMessage();
+        // Extract message from warning element if possible, or use default text
+        const msg = warning.textContent || 'WebGPU is not supported by your browser/device.';
+        showError('WebGPU Not Supported', msg);
+        throw new Error('WebGPU not supported');
+    }
+
+    if (!window.isSecureContext) {
+         showError('Insecure Context', 'WebGPU requires a secure context (HTTPS or localhost). Please check your connection.');
+         throw new Error('Insecure Context');
+    }
+
+    // --- Camera (Side-view, follows player on X axis) ---
+    // Camera positioned to the side, looking at Z=0 plane
+    camera.position.set(0, CONFIG.cameraHeight, CONFIG.cameraDistance);
+    camera.lookAt(0, CONFIG.cameraHeight, 0);
+
+    // --- Renderer ---
+    renderer = new WebGPURenderer({ canvas, antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.3; // Slightly higher for more vibrant colors
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    // --- Lighting (Moody, atmospheric) ---
+    scene.add(ambientLight);
+
+    // Main directional light (from the side for dramatic shadows)
+    mainLight.position.set(-5, 10, 10);
+    mainLight.castShadow = true;
+    mainLight.shadow.mapSize.width = 2048;
+    mainLight.shadow.mapSize.height = 2048;
+    mainLight.shadow.camera.near = 0.5;
+    mainLight.shadow.camera.far = 50;
+    mainLight.shadow.camera.left = -30;
+    mainLight.shadow.camera.right = 30;
+    mainLight.shadow.camera.top = 20;
+    mainLight.shadow.camera.bottom = -10;
+    mainLight.shadow.bias = -0.0001;
+    scene.add(mainLight);
+
+    // Rim light from behind (cinematic depth) - enhanced
+    rimLight.position.set(5, 5, -10);
+    scene.add(rimLight);
+
+    // Add accent lights for more depth
+    accentLight1.position.set(0, 5, 5);
+    scene.add(accentLight1);
+
+    accentLight2.position.set(0, 3, -5);
+    scene.add(accentLight2);
+
+} catch (err: any) {
+    showError('Initialization Error', err.message || 'Unknown error occurred during startup.');
+    throw err; // Re-throw to stop further execution if critical
+}
 
 // --- Materials ---
 const materials = {
@@ -1315,8 +1364,8 @@ function updateObstacles(delta: number) {
 
                 // Visual feedback for entering a cloud
                 // (Only trigger once per cloud entry to avoid spam)
-                if (!hitCloud.mesh.userData.playerInside) {
-                    hitCloud.mesh.userData.playerInside = true;
+                if (!hitCloud.spores.userData.playerInside) {
+                    hitCloud.spores.userData.playerInside = true;
                     // console.log("Entered Spore Cloud!");
 
                     // Emit some particles around player
@@ -1326,7 +1375,7 @@ function updateObstacles(delta: number) {
                 }
             } else {
                  // Reset 'inside' state for all nearby
-                 nearbyClouds.forEach(c => { c.mesh.userData.playerInside = false; });
+                 nearbyClouds.forEach(c => { c.spores.userData.playerInside = false; });
             }
         }
     }

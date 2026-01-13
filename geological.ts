@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import {
-    MeshStandardNodeMaterial,
-    MeshPhysicalNodeMaterial
+    MeshStandardNodeMaterial
 } from 'three/webgpu';
 import {
     time,
@@ -127,7 +126,7 @@ export function createNebulaJellyMoss(config: { size: number }) {
     const geo = new THREE.SphereGeometry(config.size, 48, 48);
     
     // TSL Material for Membrane with Vertex Wobble
-    const mat = new MeshPhysicalNodeMaterial({
+    const mat = new THREE.MeshPhysicalMaterial({
         color: 0x00ff88,
         transmission: 0.9,
         opacity: 1.0,
