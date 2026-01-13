@@ -81,7 +81,7 @@ function createPulsingConduitMaterial(baseColorHex: number, glowColorHex: number
     // Let's assume V is along the length (vertical cylinder) or X axis if rotated.
 
     // Energy flow calculation
-    const flow = sin(vUv.y.mul(20.0).minus(uTime.mul(pulseSpeed))).add(1.0).mul(0.5); // 0..1
+    const flow = sin(vUv.y.mul(20.0).sub(uTime.mul(pulseSpeed))).add(1.0).mul(0.5); // 0..1
 
     // Add some noise/variation?
     const pulse = sin(uTime.mul(2.0)).add(1.0).mul(0.5); // Global pulse
