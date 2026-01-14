@@ -237,7 +237,7 @@ loadWasm();
 // =============================================================================
 // PLAYER (Rocket Character) - GLB Model Integration
 // =============================================================================
-let player = null;
+let player: THREE.Group | null = null;
 const gltfLoader = new GLTFLoader();
 // Load the rocket GLB model
 gltfLoader.load(
@@ -1043,7 +1043,7 @@ class LevelManager {
 
     update(delta: number, cameraX: number, speed: number) {
         this.cloudSystem.update(delta, cameraX, speed);
-        waterfallSystem.update(cameraX);
+        waterfallSystem.update(cameraX, delta);
         industrialSystem.update(cameraX);
         nebulaSystem.update(delta, cameraX);
         if (asteroidFieldSystem) asteroidFieldSystem.update(delta, cameraX);
@@ -1390,6 +1390,14 @@ function handleCollision(hitIndex: number) {
         // --- NEW: Emit Explosion Particles ---
         particleSystem.emit(obs.position.clone(), 0xff5555, 15, 10.0, 1.2, 1.0);
         particleSystem.emit(obs.position.clone(), 0xaaaaaa, 10, 8.0, 0.8, 1.0);
+
+        // Special Level 6 (Aqua Expanse) Splash Effect
+        if (levelManager.currentLevel === 6) {
+             // Water splash: Blue/White particles with upward momentum
+             particleSystem.emit(obs.position.clone(), 0x88ccff, 20, 12.0, 1.5, 2.0); // Spray
+             particleSystem.emit(obs.position.clone(), 0xffffff, 10, 8.0, 0.8, 1.0);  // Foam
+        }
+
         // Collision! Flash red and bounce
         (obs.material as THREE.MeshStandardMaterial).emissive = new THREE.Color(0xff0000);
         (obs.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.0;

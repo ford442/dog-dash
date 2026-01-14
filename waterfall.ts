@@ -14,7 +14,8 @@ import {
     mix,
     sin,
     cos,
-    float
+    float,
+    normalView
 } from 'three/tsl';
 
 /**
@@ -95,6 +96,48 @@ function createWaterMaterial(baseColorHex: number, opacity: number, speed: numbe
     return mat;
 }
 
+/**
+ * Creates a TSL material for rising bubbles.
+ */
+function createBubbleMaterial() {
+    const mat = new MeshStandardNodeMaterial({
+        color: 0x88ccff,
+        transparent: true,
+        opacity: 0.6,
+        roughness: 0.0,
+        metalness: 0.1,
+    });
+
+    const uTime = time;
+
+    // --- Vertex Shader: Wobble ---
+    const pos = positionLocal;
+
+    // Simple wobble based on position and time
+    const wobbleX = sin(pos.y.mul(5.0).add(uTime.mul(3.0))).mul(0.1);
+    const wobbleY = cos(pos.x.mul(5.0).add(uTime.mul(2.0))).mul(0.1);
+
+    mat.positionNode = pos.add(vec3(wobbleX, wobbleY, 0.0));
+
+    // --- Fragment Shader: Bubble Rim ---
+    const nView = normalView;
+    // Edge glow (Fresnel)
+    const rim = float(1.0).sub(nView.z.abs());
+    const glow = rim.pow(3.0);
+
+    const bubbleColor = color(0x88ccff);
+    const centerColor = color(0xffffff);
+
+    // Mix based on rim
+    const finalColor = mix(centerColor, bubbleColor, rim);
+
+    // Output color with opacity based on rim (more opaque at edges)
+    mat.colorNode = vec4(finalColor, glow.add(0.2)); // Minimum opacity 0.2
+    mat.emissiveNode = bubbleColor.mul(glow);
+
+    return mat;
+}
+
 export class WaterfallLayer {
     mesh: THREE.Mesh;
     speed: number;
@@ -143,9 +186,119 @@ export class WaterfallLayer {
     }
 }
 
+export class BubbleLayer {
+    mesh: THREE.InstancedMesh;
+    dummy: THREE.Object3D;
+    count: number;
+    width: number;
+    height: number;
+    depth: number;
+    baseZ: number;
+
+    positions: Float32Array;
+    speeds: Float32Array;
+    scales: Float32Array;
+
+    constructor(scene: THREE.Scene, config: {
+        count: number,
+        width: number,
+        height: number,
+        z: number,
+        zRange: number
+    }) {
+        this.count = config.count;
+        this.width = config.width;
+        this.height = config.height;
+        this.baseZ = config.z;
+        this.depth = config.zRange;
+
+        const geo = new THREE.SphereGeometry(0.3, 8, 8);
+        const mat = createBubbleMaterial();
+
+        this.mesh = new THREE.InstancedMesh(geo, mat, this.count);
+        this.mesh.renderOrder = 1; // Render after water
+        this.mesh.frustumCulled = false;
+
+        this.dummy = new THREE.Object3D();
+        this.positions = new Float32Array(this.count * 3);
+        this.speeds = new Float32Array(this.count);
+        this.scales = new Float32Array(this.count);
+
+        for (let i = 0; i < this.count; i++) {
+            const x = (Math.random() - 0.5) * this.width;
+            const y = (Math.random() - 0.5) * this.height;
+            const z = this.baseZ + (Math.random() - 0.5) * this.depth;
+
+            this.positions[i*3] = x;
+            this.positions[i*3+1] = y;
+            this.positions[i*3+2] = z;
+
+            // Random upward speed
+            this.speeds[i] = 2.0 + Math.random() * 3.0;
+
+            this.dummy.position.set(x, y, z);
+            const s = 0.5 + Math.random() * 1.0;
+            this.scales[i] = s;
+            this.dummy.scale.setScalar(s);
+
+            this.dummy.updateMatrix();
+            this.mesh.setMatrixAt(i, this.dummy.matrix);
+        }
+
+        scene.add(this.mesh);
+        this.mesh.visible = false;
+    }
+
+    update(delta: number, cameraX: number) {
+        const margin = 20;
+        const limitBack = cameraX - (this.width / 2) - margin;
+        const limitFront = cameraX + (this.width / 2) + margin;
+        const topY = this.height / 2;
+        const bottomY = -this.height / 2;
+
+        for (let i = 0; i < this.count; i++) {
+            const idx = i * 3;
+
+            // Rise
+            this.positions[idx+1] += this.speeds[i] * delta;
+
+            let x = this.positions[idx];
+            let y = this.positions[idx+1];
+
+            // Wrap Y
+            if (y > topY) {
+                y = bottomY;
+                this.positions[idx+1] = y;
+                // Randomize X slightly on respawn
+                x = cameraX + (Math.random() - 0.5) * this.width;
+                this.positions[idx] = x;
+            }
+
+            // Wrap X (Infinite Scroll)
+            if (x < limitBack) {
+                x += this.width + margin * 2;
+                this.positions[idx] = x;
+            } else if (x > limitFront) {
+                x -= (this.width + margin * 2);
+                this.positions[idx] = x;
+            }
+
+            // Always update for smooth rising
+            this.dummy.position.set(x, y, this.positions[idx+2]);
+            this.dummy.scale.setScalar(this.scales[i]);
+
+            this.dummy.updateMatrix();
+            this.mesh.setMatrixAt(i, this.dummy.matrix);
+        }
+
+        this.mesh.instanceMatrix.needsUpdate = true;
+    }
+}
+
 export class WaterfallSystem {
     scene: THREE.Scene;
     layers: WaterfallLayer[] = [];
+    bubbles!: BubbleLayer;
     active: boolean = false;
 
     constructor(scene: THREE.Scene) {
@@ -188,22 +341,34 @@ export class WaterfallSystem {
             speed: 0.8,
             parallaxFactor: 0.1
         }));
+
+        // Bubbles Layer
+        this.bubbles = new BubbleLayer(this.scene, {
+            count: 100,
+            width: 150,
+            height: 60,
+            z: -10, // In midground
+            zRange: 20
+        });
     }
 
     activate() {
         if (this.active) return;
         this.active = true;
         this.layers.forEach(l => l.mesh.visible = true);
+        this.bubbles.mesh.visible = true;
     }
 
     deactivate() {
         if (!this.active) return;
         this.active = false;
         this.layers.forEach(l => l.mesh.visible = false);
+        this.bubbles.mesh.visible = false;
     }
 
-    update(cameraX: number) {
+    update(cameraX: number, delta: number = 0.016) {
         if (!this.active) return;
         this.layers.forEach(l => l.update(cameraX));
+        this.bubbles.update(delta, cameraX);
     }
 }
