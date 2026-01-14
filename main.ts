@@ -842,21 +842,21 @@ class LevelManager {
                 levelType: 'open'
             },
             3: {
-                name: "The Deep Void",
+                name: "Orbital Descent",
                 distance: 2200, // Start + 1700
-                asteroidRate: 1.2, // Medium but fast rocks?
+                asteroidRate: 1.8, // Sparse asteroids to admire the view
                 foliageDensity: {
                     fern: 5,
                     rose: 0,
-                    lotus: 20, // Alien
+                    lotus: 15,
                     glowingFlower: 5,
                     tree: 5,
                     floweringTree: 0,
                     shrub: 5,
-                    vine: 20, // Creepy
-                    orb: 50, // Many orbs
+                    vine: 15,
+                    orb: 30, // Some orbital debris
                     mushroom: 5,
-                    cloud: 40, // Foggy
+                    cloud: 20, // Less fog, more planet visibility
                     // Deep void has most dangerous geological objects
                     voidRootBall: 12,
                     vacuumKelp: 15,
@@ -865,7 +865,7 @@ class LevelManager {
                     magmaHeart: 8
                 },
                 speed: 10,
-                bgColor: 0x000000, // Pitch black
+                bgColor: 0x000510, // Deep space blue/black
                 levelType: 'open'
             },
             4: {
@@ -1021,11 +1021,22 @@ class LevelManager {
             waterfallSystem.deactivate();
         }
 
-        // Activate Asteroid Fields in Level 2 & 3
-        if (levelIndex === 2 || levelIndex === 3) {
+        // Activate Asteroid Fields in Level 2 only (Level 3 has Planet)
+        if (levelIndex === 2) {
             asteroidFieldSystem.activate();
         } else {
             asteroidFieldSystem.deactivate();
+        }
+
+        // Activate Planetary Horizon in Level 3
+        if (levelIndex === 3) {
+            planetaryHorizonSystem.activate();
+            // Hide standard stars? No, let them mix or maybe hide if planet covers them.
+            // PlanetarySystem has its own deep space stars.
+            // We can keep the main scene stars (uStarOpacity) or fade them?
+            // uStarOpacity.value is global. Let's leave them.
+        } else {
+            planetaryHorizonSystem.deactivate();
         }
 
         if (levelIndex === 5) {

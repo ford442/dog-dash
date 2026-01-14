@@ -252,7 +252,8 @@ export class PlanetaryHorizonSystem {
         const planetGeo = new THREE.SphereGeometry(radius, 128, 128); // Higher detail
         const planetMat = createPlanetSurfaceMaterial(0x2255ff);
         this.planet = new THREE.Mesh(planetGeo, planetMat);
-        this.planet.position.set(0, -420, -100); // Center below, deep in background
+        // Adjusted Y to -405 so the horizon (top at -5) is visible at the bottom of the screen
+        this.planet.position.set(0, -405, -100);
         this.container.add(this.planet);
 
         // 2. Cloud Layer
