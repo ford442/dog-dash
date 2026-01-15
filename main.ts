@@ -44,6 +44,7 @@ import { AsteroidFieldSystem } from './asteroid_field';
 import { PlanetaryHorizonSystem } from './planetary_horizon';
 import { IndustrialBackgroundSystem } from './industrial_background';
 import { NebulaSystem } from './nebula';
+import { AtmosphereSystem } from './sky';
 
 // --- Configuration ---
 const CONFIG = {
@@ -379,6 +380,7 @@ type LevelConfig = {
     };
     speed: number;
     bgColor: number;
+    skyColors: { top: number, bottom: number };
     // New tunnel-related properties
     levelType?: 'open' | 'tunnel' | 'organic_tunnel';
     tunnelHeight?: number;
@@ -782,9 +784,11 @@ class LevelManager {
     config: { [key: number]: LevelConfig };
     levelObjects: THREE.Object3D[];
     cloudSystem: CloudSystem;
+    atmosphereSystem: AtmosphereSystem;
 
     constructor() {
         this.cloudSystem = new CloudSystem(scene);
+        this.atmosphereSystem = new AtmosphereSystem(scene);
         this.currentLevel = 1;
         this.config = {
             1: {
@@ -812,6 +816,7 @@ class LevelManager {
                 },
                 speed: 6,
                 bgColor: 0x1a1a2e,
+                skyColors: { top: 0x000000, bottom: 0x1a1a2e }, // Dark Purple/Black
                 levelType: 'open'
             },
             2: {
@@ -839,6 +844,7 @@ class LevelManager {
                 },
                 speed: 8,
                 bgColor: 0x2d1a1a, // Reddish
+                skyColors: { top: 0x000000, bottom: 0x2d1a1a }, // Reddish
                 levelType: 'open'
             },
             3: {
@@ -866,6 +872,7 @@ class LevelManager {
                 },
                 speed: 10,
                 bgColor: 0x000510, // Deep space blue/black
+                skyColors: { top: 0x000011, bottom: 0x001133 }, // Deep Blue/Black -> Blue Atmosphere
                 levelType: 'open'
             },
             4: {
@@ -894,6 +901,7 @@ class LevelManager {
                 },
                 speed: 12,
                 bgColor: 0x1a1008, // Dark orange-brown industrial
+                skyColors: { top: 0x110800, bottom: 0x221105 }, // Smoky Brown
                 levelType: 'tunnel',
                 tunnelHeight: 15,
                 obstacleInterval: 20 // Spawn structural section every 20m
@@ -924,6 +932,7 @@ class LevelManager {
                 },
                 speed: 10,
                 bgColor: 0x0a0810, // Deep purple-blue organic
+                skyColors: { top: 0x0a001a, bottom: 0x1a0033 }, // Nebula Purple
                 levelType: 'organic_tunnel',
                 tunnelHeight: 20,
                 obstacleInterval: 25, // Spawn rib section every 25m
@@ -953,6 +962,7 @@ class LevelManager {
                 },
                 speed: 10,
                 bgColor: 0x001133, // Deep blue
+                skyColors: { top: 0x001133, bottom: 0x002244 }, // Deep Sea Blue
                 levelType: 'open'
             }
         };
@@ -971,9 +981,20 @@ class LevelManager {
         // Update Game State
         playerState.autoScrollSpeed = cfg.speed;
         playerState.distanceToMoon = cfg.distance;
-        scene.background = new THREE.Color(cfg.bgColor);
+
+        // --- ATMOSPHERE UPDATE ---
+        let transitionDuration = 2.0;
+        if (levelIndex === 3) {
+            // Level 3 "Orbital Descent" should take ~100s to fully transition to blue
+            // 1000m / 10m/s = 100s
+            transitionDuration = 100.0;
+        }
+
+        this.atmosphereSystem.transitionTo(cfg.skyColors.top, cfg.skyColors.bottom, transitionDuration);
+        // Note: AtmosphereSystem handles fog color now.
+
         if (scene.fog) {
-            scene.fog.color = new THREE.Color(cfg.bgColor);
+            // scene.fog.color is updated by AtmosphereSystem
             // Apply custom fog density for Memory Fog effect (Level 5)
             if (scene.fog instanceof THREE.Fog) {
                 if (cfg.fogDensity) {
@@ -1053,6 +1074,7 @@ class LevelManager {
     }
 
     update(delta: number, cameraX: number, speed: number) {
+        this.atmosphereSystem.update(delta, new THREE.Vector3(cameraX, 0, 0)); // Only X matters for now
         this.cloudSystem.update(delta, cameraX, speed);
         waterfallSystem.update(cameraX, delta);
         industrialSystem.update(cameraX);
