@@ -1,62 +1,137 @@
 import * as THREE from 'three';
 import {
-    MeshStandardNodeMaterial,
-    MeshBasicNodeMaterial
+    MeshBasicNodeMaterial,
+    MeshStandardNodeMaterial
 } from 'three/webgpu';
 import {
     time,
     positionLocal,
-    sin,
-    cos,
+    uv,
+    vec2,
     vec3,
-    mix,
+    vec4,
     color,
     uniform,
+    mix,
+    sin,
+    cos,
     float,
-    varying,
-    vec4
+    length,
+    smoothstep,
+    dot,
+    fract,
+    max
 } from 'three/tsl';
 
+// --- TSL Noise Functions ---
+
+const random2D = (v: any) => {
+    return sin(dot(v, vec2(12.9898, 78.233))).mul(43758.5453).fract();
+};
+
+const valueNoise = (v: any) => {
+    const i = v.floor();
+    const f = v.fract();
+
+    // Four corners
+    const a = random2D(i);
+    const b = random2D(i.add(vec2(1.0, 0.0)));
+    const c = random2D(i.add(vec2(0.0, 1.0)));
+    const d = random2D(i.add(vec2(1.0, 1.0)));
+
+    // Smooth interpolation curve
+    const u = f.mul(f).mul(float(3.0).sub(f.mul(2.0)));
+
+    return mix(a, b, u.x).add(
+        (c.sub(a).mul(u.y).mul(float(1.0).sub(u.x))).add(
+        (d.sub(b).mul(u.x).mul(u.y)))
+    );
+};
+
+const fbm = (v: any) => {
+    let total = float(0.0);
+    let amplitude = float(0.5);
+    let frequency = float(1.0);
+
+    // 3 Octaves
+    total = total.add(valueNoise(v.mul(frequency)).mul(amplitude));
+    frequency = frequency.mul(2.0);
+    amplitude = amplitude.mul(0.5);
+
+    total = total.add(valueNoise(v.mul(frequency)).mul(amplitude));
+    frequency = frequency.mul(2.0);
+    amplitude = amplitude.mul(0.5);
+
+    total = total.add(valueNoise(v.mul(frequency)).mul(amplitude));
+
+    return total;
+};
+
 /**
- * Creates a TSL material for cloud puffs.
+ * Creates a TSL material for cloud sprites (billboards).
  * Features:
- * - Soft edges (approximated via transparency/fresnel)
- * - Billowing animation (vertex displacement)
- * - Color gradient
+ * - Procedural shape (Soft circle + Noise erosion)
+ * - Billowing animation (Time-based noise offset)
+ * - Internal lighting/shading simulation via noise density
+ * - Lightning flash support
  */
-function createCloudMaterial(baseColor: number, opacity: number) {
-    const mat = new MeshStandardNodeMaterial({
-        color: baseColor,
+function createCloudSpriteMaterial(baseColorHex: number, opacity: number, detail: number = 1.0) {
+    const mat = new MeshBasicNodeMaterial({
         transparent: true,
         opacity: opacity,
-        roughness: 1.0,
-        metalness: 0.0,
-        flatShading: false,
-        side: THREE.FrontSide
+        side: THREE.FrontSide, // Sprites face camera
+        depthWrite: false, // Soft blending
+        blending: THREE.NormalBlending // Standard alpha blending
     });
 
     const uTime = time;
-    const uBillowSpeed = uniform(1.0);
-    const uBillowScale = uniform(0.5);
-    const uFlash = uniform(0.0); // Lightning flash intensity (0 to 1)
+    const uBillowSpeed = uniform(0.2);
+    const uFlash = uniform(0.0);
+    const uDetail = uniform(detail);
 
-    // --- Vertex Shader: Billowing ---
-    const pos = positionLocal;
+    // --- Fragment Shader ---
+    const vUv = uv();
 
-    // Simple noise-like displacement using sines
-    const noiseX = sin(pos.y.mul(2.0).add(uTime.mul(uBillowSpeed)));
-    const noiseY = cos(pos.z.mul(1.5).add(uTime.mul(uBillowSpeed).mul(0.8)));
-    const noiseZ = sin(pos.x.mul(2.0).add(uTime.mul(uBillowSpeed).mul(1.2)));
+    // Center UVs to -0.5 to 0.5 for radial calculations
+    const centeredUv = vUv.sub(0.5);
+    const dist = length(centeredUv).mul(2.0); // 0 at center, 1 at edge
 
-    const displacement = vec3(noiseX, noiseY, noiseZ).mul(uBillowScale);
-    mat.positionNode = pos.add(displacement);
+    // 1. Base Shape (Soft Circle)
+    const core = float(1.0).sub(dist); // 1 at center, 0 at edge
+    const softShape = smoothstep(0.0, 0.2, core); // Soft edge fade
 
-    // --- Fragment Shader: Lightning ---
-    // Mix emissive color based on flash
-    const flashColor = color(0xffffff); // White lightning
-    mat.emissiveNode = mix(vec3(0.0), flashColor, uFlash);
+    // 2. Procedural Noise (Texture)
+    // Scale UVs for noise
+    const noiseUv = vUv.mul(3.0).mul(uDetail);
 
-    // Store uniforms for JS access
+    // Animate noise for billowing effect
+    // We scroll the noise domain slightly and evolve z-slice (if 3d) or just offset
+    const scroll = vec2(uTime.mul(uBillowSpeed).mul(0.5), uTime.mul(uBillowSpeed).mul(0.2));
+    const noiseVal = fbm(noiseUv.add(scroll));
+
+    // 3. Erode shape with noise
+    // Combine shape and noise.
+    // Edges get more eroded. Center stays denser.
+    const density = softShape.mul(noiseVal.add(0.2));
+
+    // Sharpen alpha slightly to define puff
+    const alpha = smoothstep(0.1, 0.6, density).mul(opacity);
+
+    // 4. Color & Lighting
+    const baseColor = color(new THREE.Color(baseColorHex));
+
+    // internal shadows: darker where noise is low (crevices)
+    const shadowFactor = noiseVal.mul(0.5).add(0.5);
+    const finalColor = baseColor.mul(shadowFactor);
+
+    // 5. Lightning Flash
+    // Flash adds white emissive boost
+    const flashColor = color(0xffffff);
+    const flashedColor = mix(finalColor, flashColor, uFlash);
+
+    mat.colorNode = vec4(flashedColor, alpha);
+
+    // Store uniforms
     mat.userData.uFlash = uFlash;
 
     return mat;
@@ -66,12 +141,12 @@ export class CloudLayer {
     mesh: THREE.InstancedMesh;
     dummy: THREE.Object3D;
     count: number;
-    speed: number;
-    width: number; // The width of the scrolling window
-    startX: number; // Where clouds spawn relative to camera
+    windSpeed: number; // Independent speed
+    width: number;
 
     // Instance data
-    positions: Float32Array; // Stored to manage wrapping logic in JS
+    positions: Float32Array;
+    scales: Float32Array;
 
     constructor(
         scene: THREE.Scene,
@@ -83,43 +158,43 @@ export class CloudLayer {
             opacity: number,
             scaleMin: number,
             scaleMax: number,
-            speed: number, // relative to player? No, absolute scroll speed factor.
-            width: number
+            windSpeed: number, // Speed relative to world (crawling)
+            width: number,
+            detail?: number
         }
     ) {
         this.count = config.count;
-        this.speed = config.speed;
+        this.windSpeed = config.windSpeed;
         this.width = config.width;
-        this.startX = -config.width / 2; // Not used directly, we center around camera
 
-        const geo = new THREE.SphereGeometry(1, 7, 7); // Low poly spheres
-        const mat = createCloudMaterial(config.color, config.opacity);
+        // Use PlaneGeometry for Sprites
+        const geo = new THREE.PlaneGeometry(1, 1);
+        const mat = createCloudSpriteMaterial(config.color, config.opacity, config.detail || 1.0);
 
         this.mesh = new THREE.InstancedMesh(geo, mat, this.count);
-        this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-        this.mesh.castShadow = false; // Clouds don't usually cast sharp shadows in this style
-        this.mesh.receiveShadow = true; // But they can receive
+        this.mesh.frustumCulled = false; // Infinite scroll
+        this.mesh.renderOrder = config.z < 0 ? -2 : 2; // Background vs Foreground ordering
 
         this.dummy = new THREE.Object3D();
         this.positions = new Float32Array(this.count * 3);
+        this.scales = new Float32Array(this.count);
 
-        // Initial Layout: Distribute randomly in a box
+        // Initial Layout
         for (let i = 0; i < this.count; i++) {
             const x = (Math.random() - 0.5) * config.width;
-            const y = (Math.random() - 0.5) * 20; // Height variation
+            const y = (Math.random() - 0.5) * 30; // Spread vertically
             const z = config.z + (Math.random() - 0.5) * config.zRange;
 
             this.positions[i*3] = x;
             this.positions[i*3+1] = y;
             this.positions[i*3+2] = z;
 
-            this.dummy.position.set(x, y, z);
-
-            // Random Scale (flattened)
             const s = config.scaleMin + Math.random() * (config.scaleMax - config.scaleMin);
-            this.dummy.scale.set(s * 2, s, s * 1.5); // Wide puffs
+            this.scales[i] = s;
 
-            this.dummy.rotation.z = (Math.random() - 0.5) * 0.5;
+            this.dummy.position.set(x, y, z);
+            this.dummy.scale.set(s * 1.5, s, 1.0); // Wider clouds
+            this.dummy.rotation.set(0, 0, (Math.random() - 0.5) * 0.2); // Slight tilt
 
             this.dummy.updateMatrix();
             this.mesh.setMatrixAt(i, this.dummy.matrix);
@@ -128,60 +203,56 @@ export class CloudLayer {
         scene.add(this.mesh);
     }
 
-    update(delta: number, cameraX: number, playerSpeed: number) {
-        // We simulate parallax by moving clouds slower than the player.
-        // Actually, in a side scroller:
-        // Objects at Z=0 move at playerSpeed (relative to world 0,0)
-        // Background objects should move SLOWER than playerSpeed?
-        // Wait, if I move camera +X, static objects at -Z appear to move -X.
-        // Perspective camera handles parallax AUTOMATICALLY for static objects.
+    update(delta: number, cameraX: number) {
+        // Parallax & Scrolling Logic
+        // We want clouds to "crawl" (windSpeed) AND parallax.
+        // Actually, if we move them by windSpeed * delta, they move in world space.
+        // The camera movement naturally creates parallax.
 
-        // However, we want "Infinite Scrolling".
-        // We need to wrap objects that fall behind the camera to the front.
-
-        // We define a "window" around cameraX: [cameraX - width/2, cameraX + width/2]
-        const margin = 20; // Buffer
-        const windowHalf = this.width / 2;
-        const limitBack = cameraX - windowHalf - margin;
-        const limitFront = cameraX + windowHalf + margin;
+        const margin = 30;
+        const limitBack = cameraX - (this.width / 2) - margin;
+        const limitFront = cameraX + (this.width / 2) + margin;
 
         let needsUpdate = false;
 
         for (let i = 0; i < this.count; i++) {
             const idx = i * 3;
+
+            // 1. Apply Wind
+            this.positions[idx] += this.windSpeed * delta;
+
             let x = this.positions[idx];
 
-            // Parallax drift (optional extra movement)
-            // this.positions[idx] -= this.speed * delta;
-            // Actually, let them be static in world space, just wrap them.
-
-            // Check bounds
+            // 2. Wrap around camera
             if (x < limitBack) {
-                // Move to front
                 x += this.width + margin * 2;
                 this.positions[idx] = x;
-
-                // Randomize Y and Z slightly again?
-                // this.positions[idx+1] = (Math.random() - 0.5) * 20;
-                // No, keep cohesive structure to avoid popping Y/Z
-
+                // Optional: Randomize Y slightly on respawn to vary pattern?
+                // this.positions[idx+1] = (Math.random() - 0.5) * 30;
                 needsUpdate = true;
             } else if (x > limitFront) {
-                // If player moves left (rare, but possible)
                 x -= (this.width + margin * 2);
                 this.positions[idx] = x;
                 needsUpdate = true;
             }
 
-            if (needsUpdate) {
-                // Update matrix for this instance only
-                this.mesh.getMatrixAt(i, this.dummy.matrix);
-                this.dummy.matrix.decompose(this.dummy.position, this.dummy.quaternion, this.dummy.scale);
+            if (needsUpdate || this.windSpeed !== 0) {
+                // Update matrix
+                const y = this.positions[idx+1];
+                const z = this.positions[idx+2];
+                const s = this.scales[i];
 
-                this.dummy.position.set(x, this.positions[idx+1], this.positions[idx+2]);
+                this.dummy.position.set(x, y, z);
+                this.dummy.scale.set(s * 1.5, s, 1.0);
+                // Keep rotation? We didn't store it, assuming static small tilt is fine or reset it.
+                // Let's keep it simple and reset tilt to random deterministic if needed,
+                // but here we just zero it or keep previous if we read it back.
+                // Optim: Just set it.
+                this.dummy.rotation.set(0, 0, 0);
+
                 this.dummy.updateMatrix();
-
                 this.mesh.setMatrixAt(i, this.dummy.matrix);
+                needsUpdate = true;
             }
         }
 
@@ -209,67 +280,98 @@ export class CloudSystem {
     }
 
     initLayers() {
-        // Layer 1: Far Background (Dark, slow, dense)
+        // "Thunder Force IV" Style - 5 Layers
+
+        // Layer 1: Deep Background (Slowest, Faint, Huge)
+        // Crawls slowly to the left (negative speed)
         this.layers.push(new CloudLayer(this.scene, {
-            count: 40,
-            z: -60,
+            count: 25,
+            z: -80,
             zRange: 20,
-            color: 0x0f0f20, // Dark blue/purple
-            opacity: 0.8,
-            scaleMin: 8,
-            scaleMax: 15,
-            speed: 0,
-            width: 300
+            color: 0x0a0a20, // Very dark blue
+            opacity: 0.9,
+            scaleMin: 40,
+            scaleMax: 60,
+            windSpeed: -2.0, // Crawl
+            width: 400,
+            detail: 0.5
         }));
 
-        // Layer 2: Mid Ground (Lighter, some transparency)
+        // Layer 2: Background (Dark, slightly faster)
         this.layers.push(new CloudLayer(this.scene, {
             count: 30,
-            z: -30,
-            zRange: 10,
-            color: 0x2a2a4a,
-            opacity: 0.5,
-            scaleMin: 5,
-            scaleMax: 10,
-            speed: 0,
-            width: 200
+            z: -50,
+            zRange: 15,
+            color: 0x151530,
+            opacity: 0.8,
+            scaleMin: 30,
+            scaleMax: 45,
+            windSpeed: -3.0,
+            width: 350,
+            detail: 0.8
         }));
 
-        // Layer 3: Foreground (Fast, passing by, transparent)
-        // Positioned closer to camera Z=15
+        // Layer 3: Mid-Ground (Main cloud layer, semi-transparent)
+        this.layers.push(new CloudLayer(this.scene, {
+            count: 40,
+            z: -25,
+            zRange: 10,
+            color: 0x2a2a50,
+            opacity: 0.6,
+            scaleMin: 20,
+            scaleMax: 30,
+            windSpeed: -5.0,
+            width: 300,
+            detail: 1.0
+        }));
+
+        // Layer 4: Near-Mid (Lighter, faster)
+        this.layers.push(new CloudLayer(this.scene, {
+            count: 20,
+            z: -10,
+            zRange: 5,
+            color: 0x444477,
+            opacity: 0.4,
+            scaleMin: 15,
+            scaleMax: 20,
+            windSpeed: -8.0,
+            width: 250,
+            detail: 1.5
+        }));
+
+        // Layer 5: Foreground (Passes in front/very close, fast, transparent, detailed)
+        // Z > 0 (Player is at 0)
         this.layers.push(new CloudLayer(this.scene, {
             count: 10,
-            z: 5, // Between camera (15) and player (0)? Or behind player?
-                  // Player is at 0. Camera at 15.
-                  // Clouds at 5-10 will be in foreground.
-            zRange: 5,
-            color: 0x444466,
-            opacity: 0.3,
-            scaleMin: 2,
-            scaleMax: 4,
-            speed: 0,
-            width: 100
+            z: 8,
+            zRange: 4,
+            color: 0x666699,
+            opacity: 0.2,
+            scaleMin: 8,
+            scaleMax: 12,
+            windSpeed: -15.0, // Whoosh
+            width: 200,
+            detail: 2.0
         }));
     }
 
     update(delta: number, cameraX: number, playerSpeed: number) {
-        this.layers.forEach(layer => layer.update(delta, cameraX, playerSpeed));
+        this.layers.forEach(layer => layer.update(delta, cameraX));
 
-        // Random Lightning Logic
+        // Lightning Logic
         this.lightningTimer -= delta;
         if (this.lightningTimer <= 0) {
             this.triggerLightning();
-            this.lightningTimer = 5 + Math.random() * 10; // Every 5-15 seconds
+            this.lightningTimer = 3 + Math.random() * 8; // Frequent storms
         }
 
         // Update flash decay
         this.layers.forEach(layer => {
             const mat = layer.mesh.material as any;
             if (mat.userData && mat.userData.uFlash) {
-                // Decay flash value
                 const current = mat.userData.uFlash.value;
                 if (current > 0.01) {
-                    mat.userData.uFlash.value = current * 0.85; // Fast decay
+                    mat.userData.uFlash.value = current * 0.85;
                 } else {
                     mat.userData.uFlash.value = 0;
                 }
@@ -278,18 +380,16 @@ export class CloudSystem {
     }
 
     triggerLightning() {
-        // Pick a random layer (usually background)
-        const layerIdx = Math.floor(Math.random() * 2); // 0 or 1
+        // Flash deep layers more often
+        const layerIdx = Math.floor(Math.random() * 3); // 0, 1, or 2
         const layer = this.layers[layerIdx];
+        const intensity = 0.6 + Math.random() * 0.4;
 
-        // Intensity
-        const intensity = 0.5 + Math.random() * 0.5;
-
-        // Flash it
         layer.flash(intensity);
 
-        // Maybe multiple flashes?
-        setTimeout(() => layer.flash(intensity * 0.5), 100);
-        setTimeout(() => layer.flash(intensity * 0.2), 250);
+        // Chain reaction (flash nearby layers)
+        if (Math.random() > 0.5 && layerIdx < this.layers.length - 1) {
+            setTimeout(() => this.layers[layerIdx + 1].flash(intensity * 0.5), 100);
+        }
     }
 }
