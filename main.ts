@@ -17,7 +17,7 @@ import {
     createSolarSail,
     updateSolarSail
 } from './foliage';
-import { ParticleSystem } from './particles';
+import { ParticleSystem, DebrisSystem } from './particles';
 import { CloudSystem } from './clouds';
 import {
     SporeCloud,
@@ -1247,11 +1247,11 @@ const obstacles: THREE.Mesh[] = [];
 let OBSTACLE_SPAWN_INTERVAL = 1.5; // seconds
 let lastObstacleSpawn = 0;
 
-function createAsteroid(x: number, y: number) {
-    const size = 0.5 + Math.random() * 1.5;
+function createAsteroid(x: number, y: number, size: number = 0, velocity: THREE.Vector3 | null = null) {
+    const finalSize = (size > 0) ? size : (0.5 + Math.random() * 1.5);
     
     // Use IcosahedronGeometry with higher detail for more interesting shapes
-    const geo = new THREE.IcosahedronGeometry(size, 1);
+    const geo = new THREE.IcosahedronGeometry(finalSize, 1);
     
     // Add some random deformation for more organic asteroids
     const positions = geo.attributes.position;
@@ -1287,7 +1287,8 @@ function createAsteroid(x: number, y: number) {
         rotationSpeed: (Math.random() - 0.5) * 2,
         rotationSpeedY: (Math.random() - 0.5) * 1.5,
         rotationSpeedZ: (Math.random() - 0.5) * 1.8,
-        radius: size
+        radius: finalSize,
+        velocity: velocity || new THREE.Vector3(0, 0, 0)
     };
     scene.add(asteroid);
     obstacles.push(asteroid);
@@ -1324,6 +1325,11 @@ function updateObstacles(delta: number) {
         obs.rotation.x += obs.userData.rotationSpeed * delta;
         obs.rotation.y += obs.userData.rotationSpeedY * delta;
         obs.rotation.z += obs.userData.rotationSpeedZ * delta;
+
+        // Apply velocity (if fragments)
+        if (obs.userData.velocity) {
+            obs.position.addScaledVector(obs.userData.velocity, delta);
+        }
 
         // Remove if behind player
         if (obs.position.x < playerX - 30) {
@@ -1414,6 +1420,32 @@ function updateObstacles(delta: number) {
     }
 }
 
+function splitAsteroid(asteroid: THREE.Mesh) {
+    // 1. Spawn Debris
+    debrisSystem.emit(asteroid.position, 8, 5.0, asteroid.userData.radius);
+
+    // 2. Spawn smaller chunks if large enough
+    const r = asteroid.userData.radius;
+    if (r > 0.8) {
+        const count = 2 + Math.floor(Math.random() * 2); // 2 or 3 chunks
+        for(let i=0; i<count; i++) {
+            const newR = r * 0.5;
+            // Divergent velocity
+            const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5);
+            const speed = 3.0 + Math.random() * 3.0;
+            const vel = new THREE.Vector3(Math.cos(angle)*speed, Math.sin(angle)*speed, 0);
+
+            // Spawn chunks
+            createAsteroid(asteroid.position.x, asteroid.position.y, newR, vel);
+        }
+    }
+
+    // Remove original
+    scene.remove(asteroid);
+    const idx = obstacles.indexOf(asteroid);
+    if (idx > -1) obstacles.splice(idx, 1);
+}
+
 function handleCollision(hitIndex: number) {
     const obs = obstacles[hitIndex];
     if (obs) {
@@ -1422,7 +1454,6 @@ function handleCollision(hitIndex: number) {
 
         // --- NEW: Emit Explosion Particles ---
         particleSystem.emit(obs.position.clone(), 0xff5555, 15, 10.0, 1.2, 1.0);
-        particleSystem.emit(obs.position.clone(), 0xaaaaaa, 10, 8.0, 0.8, 1.0);
 
         // Special Level 6 (Aqua Expanse) Splash Effect
         if (levelManager.currentLevel === 6) {
@@ -1431,21 +1462,14 @@ function handleCollision(hitIndex: number) {
              particleSystem.emit(obs.position.clone(), 0xffffff, 10, 8.0, 0.8, 1.0);  // Foam
         }
 
-        // Collision! Flash red and bounce
-        (obs.material as THREE.MeshStandardMaterial).emissive = new THREE.Color(0xff0000);
-        (obs.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.0;
-        setTimeout(() => {
-            if (obs.material) {
-                (obs.material as THREE.MeshStandardMaterial).emissive = new THREE.Color(0x000000);
-                     (obs.material as THREE.MeshStandardMaterial).emissiveIntensity = 0;
-                 }
-             }, 200);
+        // Trigger fracture/debris
+        splitAsteroid(obs);
 
-             // Reduce health
-             playerState.health--;
-             playerState.invincible = true;
+        // Reduce health (Ramming Damage)
+        playerState.health--;
+        playerState.invincible = true;
 
-             // Flash the rocket
+        // Flash the rocket
              const rocket = player.children[0];
              if (rocket) {
                  rocket.children.forEach((child: any) => {
@@ -1547,6 +1571,7 @@ scene.add(galaxy3);
 
 // PARTICLE SYSTEM (engine trails & explosions)
 const particleSystem = new ParticleSystem(scene);
+const debrisSystem = new DebrisSystem(scene);
 
 // RE-ENTRY SYSTEM (Atmospheric Heat Effects)
 const reEntrySystem = new ReEntrySystem(scene, camera);
@@ -2180,6 +2205,7 @@ function animate() {
 
     // --- NEW: Update Particles (engine trails & explosions)
     particleSystem.update(delta);
+    debrisSystem.update(delta);
 
     // Update Re-Entry System
     if (player) {

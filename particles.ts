@@ -81,19 +81,8 @@ export class ParticleSystem {
         _color.setHex(colorHex);
 
         for (let i = 0; i < count; i++) {
-            // If full, we simply overwrite the oldest/first particle (Ring buffer style)
-            // BUT, with the "Swap-Remove" pattern used in update(), 'count' usually represents active particles.
-            // If we are full, we can overwrite a random one or the first one.
-            // For simplicity, if full, we restart at index 0 (circular) or just don't spawn.
-            // Let's use a rolling index if we want to overwrite old ones, but swap-remove compacts the array.
-            // So if full, we can't easily find the "oldest".
-            // We'll just stop emitting if full to avoid complexity, or overwrite index 0 (which might not be oldest).
-
             let index = this.count;
             if (this.count >= this.maxParticles) {
-                // Buffer full. Overwrite index 0?
-                // In a compact array, index 0 is just *a* particle.
-                // Let's just return for now to preserve performance.
                 return;
             } else {
                 this.count++;
@@ -129,7 +118,6 @@ export class ParticleSystem {
     }
 
     update(delta: number) {
-        let activeCount = 0;
         const matrix = _dummy.matrix;
 
         // Iterate forward. If dead, swap with last and decrement count.
@@ -140,7 +128,6 @@ export class ParticleSystem {
                 // Particle Died. Swap with the last active particle.
                 const last = this.count - 1;
 
-                // If we are not already the last one
                 if (i < last) {
                     this.positionX[i] = this.positionX[last];
                     this.positionY[i] = this.positionY[last];
@@ -161,7 +148,7 @@ export class ParticleSystem {
                 }
 
                 this.count--;
-                i--; // Re-process this index (since it now holds the swapped particle)
+                i--; // Re-process this index
                 continue;
             }
 
@@ -194,5 +181,173 @@ export class ParticleSystem {
         this.mesh.count = this.count;
         this.mesh.instanceMatrix.needsUpdate = true;
         if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+    }
+}
+
+/**
+ * DebrisSystem: Manages rocky debris from destroyed asteroids.
+ * Features tumbling physics, no gravity (drift), and rocky visual style.
+ */
+export class DebrisSystem {
+    maxParticles: number;
+    count: number;
+
+    positionX: Float32Array;
+    positionY: Float32Array;
+    positionZ: Float32Array;
+
+    velocityX: Float32Array;
+    velocityY: Float32Array;
+    velocityZ: Float32Array;
+
+    rotationX: Float32Array;
+    rotationY: Float32Array;
+    rotationZ: Float32Array;
+
+    rotSpeedX: Float32Array;
+    rotSpeedY: Float32Array;
+
+    life: Float32Array;
+    maxLife: Float32Array;
+    size: Float32Array;
+
+    mesh: THREE.InstancedMesh;
+
+    constructor(scene: THREE.Scene, maxParticles: number = 500) {
+        this.maxParticles = maxParticles;
+        this.count = 0;
+
+        this.positionX = new Float32Array(maxParticles);
+        this.positionY = new Float32Array(maxParticles);
+        this.positionZ = new Float32Array(maxParticles);
+
+        this.velocityX = new Float32Array(maxParticles);
+        this.velocityY = new Float32Array(maxParticles);
+        this.velocityZ = new Float32Array(maxParticles);
+
+        this.rotationX = new Float32Array(maxParticles);
+        this.rotationY = new Float32Array(maxParticles);
+        this.rotationZ = new Float32Array(maxParticles);
+
+        this.rotSpeedX = new Float32Array(maxParticles);
+        this.rotSpeedY = new Float32Array(maxParticles);
+
+        this.life = new Float32Array(maxParticles);
+        this.maxLife = new Float32Array(maxParticles);
+        this.size = new Float32Array(maxParticles);
+
+        // Rocky geometry
+        const geometry = new THREE.IcosahedronGeometry(0.2, 0);
+
+        // Rocky material
+        const material = new THREE.MeshStandardMaterial({
+            color: 0x888888,
+            roughness: 0.9,
+            metalness: 0.2,
+            flatShading: true
+        });
+
+        this.mesh = new THREE.InstancedMesh(geometry, material, maxParticles);
+        this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        scene.add(this.mesh);
+    }
+
+    emit(pos: THREE.Vector3, count: number = 3, speed: number = 5.0, size: number = 1.0) {
+        for (let i = 0; i < count; i++) {
+            if (this.count >= this.maxParticles) return;
+            const index = this.count++;
+
+            const spread = 1.0;
+            this.positionX[index] = pos.x + (Math.random() - 0.5) * spread;
+            this.positionY[index] = pos.y + (Math.random() - 0.5) * spread;
+            this.positionZ[index] = pos.z + (Math.random() - 0.5) * spread;
+
+            // Random divergent velocity
+            const vx = (Math.random() - 0.5);
+            const vy = (Math.random() - 0.5);
+            const vz = (Math.random() - 0.5);
+            const len = Math.sqrt(vx*vx + vy*vy + vz*vz) || 1;
+
+            // Speed variance
+            const s = speed * (0.8 + Math.random() * 0.4);
+
+            this.velocityX[index] = (vx / len) * s;
+            this.velocityY[index] = (vy / len) * s;
+            this.velocityZ[index] = (vz / len) * s;
+
+            // Random rotation
+            this.rotationX[index] = Math.random() * Math.PI;
+            this.rotationY[index] = Math.random() * Math.PI;
+            this.rotationZ[index] = Math.random() * Math.PI;
+
+            this.rotSpeedX[index] = (Math.random() - 0.5) * 5.0;
+            this.rotSpeedY[index] = (Math.random() - 0.5) * 5.0;
+
+            const life = 2.0 + Math.random() * 2.0;
+            this.life[index] = life;
+            this.maxLife[index] = life;
+            this.size[index] = size * (0.5 + Math.random() * 0.5);
+        }
+    }
+
+    update(delta: number) {
+        const matrix = _dummy.matrix;
+
+        for (let i = 0; i < this.count; i++) {
+            this.life[i] -= delta;
+
+            if (this.life[i] <= 0) {
+                // Swap-remove
+                const last = this.count - 1;
+                if (i < last) {
+                    this.positionX[i] = this.positionX[last];
+                    this.positionY[i] = this.positionY[last];
+                    this.positionZ[i] = this.positionZ[last];
+
+                    this.velocityX[i] = this.velocityX[last];
+                    this.velocityY[i] = this.velocityY[last];
+                    this.velocityZ[i] = this.velocityZ[last];
+
+                    this.rotationX[i] = this.rotationX[last];
+                    this.rotationY[i] = this.rotationY[last];
+                    this.rotationZ[i] = this.rotationZ[last];
+                    this.rotSpeedX[i] = this.rotSpeedX[last];
+                    this.rotSpeedY[i] = this.rotSpeedY[last];
+
+                    this.life[i] = this.life[last];
+                    this.maxLife[i] = this.maxLife[last];
+                    this.size[i] = this.size[last];
+                }
+                this.count--;
+                i--;
+                continue;
+            }
+
+            // Physics (Drift)
+            this.positionX[i] += this.velocityX[i] * delta;
+            this.positionY[i] += this.velocityY[i] * delta;
+            this.positionZ[i] += this.velocityZ[i] * delta;
+
+            // Tumbling
+            this.rotationX[i] += this.rotSpeedX[i] * delta;
+            this.rotationY[i] += this.rotSpeedY[i] * delta;
+
+            // Update Matrix
+            _dummy.position.set(this.positionX[i], this.positionY[i], this.positionZ[i]);
+            _dummy.rotation.set(this.rotationX[i], this.rotationY[i], this.rotationZ[i]);
+
+            // Shrink only at very end
+            let s = this.size[i];
+            if (this.life[i] < 0.5) {
+                s *= (this.life[i] / 0.5);
+            }
+            _dummy.scale.setScalar(s);
+
+            _dummy.updateMatrix();
+            this.mesh.setMatrixAt(i, matrix);
+        }
+
+        this.mesh.count = this.count;
+        this.mesh.instanceMatrix.needsUpdate = true;
     }
 }
